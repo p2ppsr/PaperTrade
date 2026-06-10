@@ -26,7 +26,7 @@ trap cleanup EXIT
 "${kubectl_cmd}" run "${pod}" --restart=Never --image="${kaniko_image}" --command -- sleep 3600
 "${kubectl_cmd}" wait --for=condition=Ready "pod/${pod}" --timeout=3m
 "${kubectl_cmd}" exec "${pod}" -- mkdir -p /kaniko/context
-tar \
+COPYFILE_DISABLE=1 tar \
   --exclude .git \
   --exclude node_modules \
   --exclude build \
