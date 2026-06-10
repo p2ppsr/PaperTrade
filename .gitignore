@@ -1,0 +1,9 @@
+node_modules/
+dist/
+build/
+.env
+release-manifest.json
+coverage/
+.DS_Store
+data/
+*.log

@@ -1,0 +1,63 @@
+{
+  "name": "papertrade",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "PaperTrade: a BSV content newsstand",
+  "scripts": {
+    "dev": "concurrently \"vite --host 0.0.0.0\" \"tsx watch src/server/server.ts\"",
+    "build:client": "vite build",
+    "build:server": "tsc -p tsconfig.server.json",
+    "build": "npm run build:client && npm run build:server",
+    "start": "node dist/server/server.js",
+    "migrate": "knex migrate:latest --knexfile knexfile.cjs",
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit && tsc -p tsconfig.server.json --noEmit",
+    "lint": "ts-standard --project tsconfig.json \"src/client/**/*.tsx\" && ts-standard --project tsconfig.server.json \"src/server/**/*.ts\""
+  },
+  "dependencies": {
+    "@bsv/auth-express-middleware": "^2.0.6",
+    "@bsv/payment-express-middleware": "^2.0.3",
+    "@bsv/sdk": "^2.1.4",
+    "@bsv/wallet-toolbox": "^2.1.28",
+    "body-parser": "^1.20.3",
+    "dotenv": "^16.4.7",
+    "express": "^4.21.2",
+    "knex": "^3.1.0",
+    "lucide-react": "^0.468.0",
+    "multer": "^2.1.1",
+    "mysql2": "^3.11.5",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "react-router-dom": "^6.28.0",
+    "uuid": "^11.0.3"
+  },
+  "devDependencies": {
+    "@types/body-parser": "^1.19.5",
+    "@types/express": "^4.17.21",
+    "@types/multer": "^1.4.12",
+    "@types/node": "^22.10.2",
+    "@types/react": "^18.3.12",
+    "@types/react-dom": "^18.3.1",
+    "@vitejs/plugin-react": "^6.0.2",
+    "concurrently": "^10.0.3",
+    "jsdom": "^25.0.1",
+    "ts-standard": "^12.0.2",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.2",
+    "vite": "^8.0.16",
+    "vite-plugin-node-polyfills": "^0.28.0",
+    "vitest": "^4.1.8"
+  },
+  "engines": {
+    "node": ">=20.0.0"
+  },
+  "ts-standard": {
+    "ignore": [
+      "dist/**",
+      "build/**",
+      "migrations/**",
+      "vite.config.ts"
+    ]
+  }
+}

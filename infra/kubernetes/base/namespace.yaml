@@ -1,0 +1,7 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: papertrade-prod
+  labels:
+    app.kubernetes.io/name: papertrade
+    app.kubernetes.io/part-of: papertrade

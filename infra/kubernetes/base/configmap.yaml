@@ -1,0 +1,18 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: papertrade-config
+  labels:
+    app.kubernetes.io/name: papertrade
+    app.kubernetes.io/component: runtime-config
+data:
+  NODE_ENV: "production"
+  HTTP_PORT: "8080"
+  ROUTING_PREFIX: "/api"
+  BSV_NETWORK: "mainnet"
+  HOSTING_DOMAIN: "https://papertrade.metanet.app"
+  WALLET_STORAGE_URL: "https://storage.babbage.systems"
+  DATA_DIR: "/data/papertrade"
+  SQL_DATABASE_HOST: "shared-mysql-haproxy.cars-operator-system.svc.cluster.local"
+  SQL_DATABASE_PORT: "3306"
+  SQL_DATABASE_DB_NAME: "papertrade"

@@ -1,0 +1,44 @@
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: papertrade
+  labels:
+    app.kubernetes.io/name: papertrade
+    app.kubernetes.io/component: ingress
+  annotations:
+    nginx.ingress.kubernetes.io/proxy-body-size: "300m"
+    nginx.ingress.kubernetes.io/proxy-connect-timeout: "300"
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "300"
+    nginx.ingress.kubernetes.io/proxy-send-timeout: "300"
+spec:
+  ingressClassName: nginx
+  tls:
+    - hosts:
+        - papertrade.metanet.app
+      secretName: papertrade-tls
+  rules:
+    - host: papertrade.metanet.app
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: papertrade
+                port:
+                  number: 8080
+---
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: papertrade-tls
+  labels:
+    app.kubernetes.io/name: papertrade
+    app.kubernetes.io/component: tls
+spec:
+  secretName: papertrade-tls
+  dnsNames:
+    - papertrade.metanet.app
+  issuerRef:
+    kind: ClusterIssuer
+    name: letsencrypt-nginx
