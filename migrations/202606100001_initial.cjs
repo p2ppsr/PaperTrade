@@ -1,5 +1,12 @@
 exports.up = async function up (knex) {
-  await knex.schema.createTable('server_settings', table => {
+  const createTableIfMissing = async (tableName, buildTable) => {
+    const exists = await knex.schema.hasTable(tableName)
+    if (!exists) {
+      await knex.schema.createTable(tableName, buildTable)
+    }
+  }
+
+  await createTableIfMissing('server_settings', table => {
     table.increments('id').primary()
     table.boolean('setup_complete').notNullable().defaultTo(false)
     table.enum('mode', ['private_publish', 'public_submissions']).notNullable().defaultTo('private_publish')
@@ -11,23 +18,26 @@ exports.up = async function up (knex) {
     table.timestamps(true, true)
   })
 
-  await knex('server_settings').insert({
-    id: 1,
-    setup_complete: false,
-    mode: 'private_publish',
-    price_per_page_sats: 25,
-    commission_bps: 1000,
-    wallet_storage_url: 'https://storage.babbage.systems',
-    server_key_status: 'auto_generated'
-  })
+  const settingsRow = await knex('server_settings').where({ id: 1 }).first()
+  if (!settingsRow) {
+    await knex('server_settings').insert({
+      id: 1,
+      setup_complete: false,
+      mode: 'private_publish',
+      price_per_page_sats: 25,
+      commission_bps: 1000,
+      wallet_storage_url: 'https://storage.babbage.systems',
+      server_key_status: 'auto_generated'
+    })
+  }
 
-  await knex.schema.createTable('admins', table => {
+  await createTableIfMissing('admins', table => {
     table.string('identity_key', 130).primary()
     table.string('added_by', 130)
     table.timestamps(true, true)
   })
 
-  await knex.schema.createTable('authors', table => {
+  await createTableIfMissing('authors', table => {
     table.string('identity_key', 130).primary()
     table.string('display_name', 160).notNullable()
     table.text('bio')
@@ -35,7 +45,7 @@ exports.up = async function up (knex) {
     table.timestamps(true, true)
   })
 
-  await knex.schema.createTable('publications', table => {
+  await createTableIfMissing('publications', table => {
     table.string('id', 36).primary()
     table.string('author_identity_key', 130).notNullable().references('identity_key').inTable('authors')
     table.string('title', 240).notNullable()
@@ -53,7 +63,7 @@ exports.up = async function up (knex) {
     table.index(['author_identity_key'])
   })
 
-  await knex.schema.createTable('publication_files', table => {
+  await createTableIfMissing('publication_files', table => {
     table.string('id', 36).primary()
     table.string('publication_id', 36).notNullable().references('id').inTable('publications').onDelete('CASCADE')
     table.enum('kind', ['source', 'canonical_pdf']).notNullable()
@@ -66,7 +76,7 @@ exports.up = async function up (knex) {
     table.index(['publication_id', 'kind'])
   })
 
-  await knex.schema.createTable('publication_pages', table => {
+  await createTableIfMissing('publication_pages', table => {
     table.increments('id').primary()
     table.string('publication_id', 36).notNullable().references('id').inTable('publications').onDelete('CASCADE')
     table.integer('page_number').unsigned().notNullable()
@@ -77,7 +87,7 @@ exports.up = async function up (knex) {
     table.unique(['publication_id', 'page_number'])
   })
 
-  await knex.schema.createTable('page_entitlements', table => {
+  await createTableIfMissing('page_entitlements', table => {
     table.increments('id').primary()
     table.string('publication_id', 36).notNullable().references('id').inTable('publications').onDelete('CASCADE')
     table.integer('page_number').unsigned().notNullable()
@@ -89,7 +99,7 @@ exports.up = async function up (knex) {
     table.index(['reader_identity_key', 'expires_at'])
   })
 
-  await knex.schema.createTable('payments', table => {
+  await createTableIfMissing('payments', table => {
     table.string('id', 36).primary()
     table.string('publication_id', 36).notNullable().references('id').inTable('publications').onDelete('CASCADE')
     table.integer('page_number').unsigned().notNullable()
@@ -104,7 +114,7 @@ exports.up = async function up (knex) {
     table.index(['reader_identity_key'])
   })
 
-  await knex.schema.createTable('ledger_entries', table => {
+  await createTableIfMissing('ledger_entries', table => {
     table.increments('id').primary()
     table.string('account_type', 40).notNullable()
     table.string('account_identity_key', 130)
@@ -118,7 +128,7 @@ exports.up = async function up (knex) {
     table.index(['source_type', 'source_id'])
   })
 
-  await knex.schema.createTable('payouts', table => {
+  await createTableIfMissing('payouts', table => {
     table.string('id', 36).primary()
     table.string('author_identity_key', 130).notNullable().references('identity_key').inTable('authors')
     table.integer('amount_sats').unsigned().notNullable()
@@ -132,7 +142,7 @@ exports.up = async function up (knex) {
     table.index(['author_identity_key', 'status'])
   })
 
-  await knex.schema.createTable('audit_events', table => {
+  await createTableIfMissing('audit_events', table => {
     table.increments('id').primary()
     table.string('actor_identity_key', 130)
     table.string('event_type', 120).notNullable()
