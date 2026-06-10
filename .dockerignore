@@ -1,0 +1,10 @@
+.git
+node_modules
+build
+dist
+coverage
+data
+.env
+release-manifest.json
+npm-debug.log
+.DS_Store
