@@ -32,6 +32,10 @@ function getWallet (): WalletClient {
   return new WalletClient('auto', WALLET_ORIGIN)
 }
 
+function absoluteRequestUrl (url: string): string {
+  return new URL(url, window.location.origin).toString()
+}
+
 function asBase64 (bytes: number[]): string {
   return Utils.toBase64(bytes)
 }
@@ -45,13 +49,14 @@ function randomBase64 (length: number): string {
 async function authFetch (url: string, init?: RequestInit): Promise<Response> {
   const wallet = getWallet()
   const fetcher = new AuthFetch(wallet)
-  return await fetcher.fetch(url, init as any)
+  return await fetcher.fetch(absoluteRequestUrl(url), init as any)
 }
 
 async function paidPageFetch (url: string, serverPublicKey?: string): Promise<Response> {
   const wallet = getWallet()
   const fetcher = new AuthFetch(wallet)
-  const first = await fetcher.fetch(url)
+  const requestUrl = absoluteRequestUrl(url)
+  const first = await fetcher.fetch(requestUrl)
   if (first.status !== 402) return first
   if (serverPublicKey == null || serverPublicKey === '') throw new Error('Server payment key is not available')
   const sats = Number(first.headers.get('x-bsv-payment-satoshis-required') ?? '0')
@@ -77,7 +82,7 @@ async function paidPageFetch (url: string, serverPublicKey?: string): Promise<Re
     options: { randomizeOutputs: false, acceptDelayedBroadcast: false }
   } as any)
   if (!Array.isArray(action.tx)) throw new Error('Wallet did not return a transaction')
-  return await fetcher.fetch(url, {
+  return await fetcher.fetch(requestUrl, {
     headers: {
       'x-bsv-payment': JSON.stringify({
         derivationPrefix,
