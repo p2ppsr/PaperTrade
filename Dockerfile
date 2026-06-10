@@ -2,7 +2,7 @@ FROM node:20-bookworm-slim AS build
 
 WORKDIR /app
 COPY package*.json ./
-RUN npm ci
+RUN npm install
 COPY . .
 RUN npm run build
 
@@ -20,7 +20,7 @@ RUN apt-get update \
   && rm -rf /var/lib/apt/lists/*
 
 COPY package*.json ./
-RUN npm ci --omit=dev
+RUN npm install --omit=dev
 COPY --from=build /app/build ./build
 COPY --from=build /app/dist ./dist
 COPY migrations ./migrations
