@@ -139,7 +139,7 @@ async function pageFetch (url: string, pageNumber: number, serverPublicKey?: str
 function useStatus (): [Status | null, () => Promise<void>] {
   const [status, setStatus] = useState<Status | null>(null)
   const refresh = async (): Promise<void> => {
-    const res = await authFetch(`${API}/status`)
+    const res = await fetch(`${API}/status`)
     const json = await res.json()
     setStatus(json)
   }
