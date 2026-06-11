@@ -134,6 +134,25 @@ const BSV_BROWSER_URL = 'https://desktop.bsvb.tech/'
 const PAPERTRADE_GITHUB_URL = 'https://github.com/p2ppsr/PaperTrade'
 const WALLET_TIMEOUT_MS = 20000
 let walletRequestQueue: Promise<unknown> = Promise.resolve()
+const TELEMETRIED_WALLET_METHODS = new Set([
+  'getPublicKey',
+  'createAction',
+  'signAction',
+  'abortAction',
+  'internalizeAction',
+  'listActions',
+  'listOutputs',
+  'relinquishOutput',
+  'acquireCertificate',
+  'listCertificates',
+  'proveCertificate',
+  'relinquishCertificate',
+  'discoverByIdentityKey',
+  'isAuthenticated',
+  'waitForAuthentication',
+  'getNetwork',
+  'getVersion'
+])
 const DEFAULT_APPEARANCE: Appearance = {
   serverName: 'PaperTrade',
   newsstandLabel: 'Newsstand',
@@ -163,6 +182,65 @@ interface WalletOption {
 
 function getWallet (): WalletClient {
   return new WalletClient(getWalletSubstrate(), WALLET_ORIGINATOR)
+}
+
+function summarizeWalletResult (result: unknown): Record<string, unknown> {
+  if (result == null || typeof result !== 'object') return { resultType: typeof result }
+  const value = result as Record<string, unknown>
+  return cleanContext({
+    resultType: 'object',
+    accepted: typeof value.accepted === 'boolean' ? value.accepted : undefined,
+    hasTx: typeof value.tx === 'string' || Array.isArray(value.tx),
+    hasTxid: typeof value.txid === 'string',
+    hasSignableTransaction: value.signableTransaction != null,
+    outputCount: Array.isArray(value.outputs) ? value.outputs.length : undefined,
+    actionCount: Array.isArray(value.actions) ? value.actions.length : undefined,
+    certificateCount: Array.isArray(value.certificates) ? value.certificates.length : undefined,
+    publicKeyLength: typeof value.publicKey === 'string' ? value.publicKey.length : undefined,
+    network: typeof value.network === 'string' ? value.network : undefined,
+    version: typeof value.version === 'string' ? value.version : undefined
+  })
+}
+
+function instrumentWalletForTelemetry (wallet: WalletClient, requestContext: Record<string, unknown>): WalletClient {
+  return new Proxy(wallet as unknown as Record<string, unknown>, {
+    get (target, property, receiver) {
+      const value = Reflect.get(target, property, receiver)
+      if (typeof property !== 'string' || typeof value !== 'function' || !TELEMETRIED_WALLET_METHODS.has(property)) return value
+      return async (...args: unknown[]) => {
+        const startedAt = performance.now()
+        postTelemetry('wallet.method_started', 'info', {
+          context: {
+            ...requestContext,
+            walletMethod: property
+          }
+        })
+        try {
+          const result = await value.apply(target, args)
+          postTelemetry('wallet.method_finished', 'info', {
+            durationMs: performance.now() - startedAt,
+            context: {
+              ...requestContext,
+              walletMethod: property,
+              ...summarizeWalletResult(result)
+            }
+          })
+          return result
+        } catch (err) {
+          const message = err instanceof Error ? err.message : typeof err === 'string' ? err : 'Wallet method failed'
+          postTelemetry('wallet.method_failed', 'error', {
+            durationMs: performance.now() - startedAt,
+            context: {
+              ...requestContext,
+              walletMethod: property,
+              message
+            }
+          })
+          throw err
+        }
+      }
+    }
+  }) as unknown as WalletClient
 }
 
 function hasReactNativeWalletBridge (): boolean {
@@ -265,7 +343,7 @@ async function authFetch (url: string, init?: RequestInit, action = 'complete th
     postTelemetry('wallet.request_started', 'info', {
       context: { method, url: new URL(requestUrl).pathname }
     })
-    const wallet = getWallet()
+    const wallet = instrumentWalletForTelemetry(getWallet(), { method, url: new URL(requestUrl).pathname, action })
     const fetcher = new AuthFetch(wallet, undefined, undefined, WALLET_ORIGINATOR)
     try {
       const response = await fetcher.fetch(requestUrl, init as any)
