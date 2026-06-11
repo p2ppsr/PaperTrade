@@ -106,15 +106,34 @@ async function paidPageFetch (url: string): Promise<Response> {
   return await withWalletTimeout(authFetch(url), 'pay for this page')
 }
 
+function withFormatJson (url: string): string {
+  return `${url}${url.includes('?') ? '&' : '?'}format=json`
+}
+
 async function pageFetch (url: string, pageNumber: number): Promise<Response> {
   if (pageNumber === 1) return await fetch(url)
-  return await paidPageFetch(url)
+  return await paidPageFetch(withFormatJson(url))
+}
+
+function base64ToBlob (base64: string, mimeType: string): Blob {
+  const binary = atob(base64)
+  const bytes = new Uint8Array(binary.length)
+  for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i)
+  return new Blob([bytes], { type: mimeType })
 }
 
 async function responseToPngBlob (res: Response, fallbackMessage: string): Promise<Blob> {
   if (!res.ok) {
     const json = await res.json().catch(() => ({}))
     throw new Error(json.message ?? json.description ?? `${fallbackMessage} with HTTP ${res.status}`)
+  }
+  const contentType = res.headers.get('content-type') ?? ''
+  if (contentType.includes('application/json')) {
+    const json = await res.json()
+    if (json.mimeType !== 'image/png' || typeof json.dataBase64 !== 'string') {
+      throw new Error(`${fallbackMessage}: server did not return a rendered page image`)
+    }
+    return base64ToBlob(json.dataBase64, json.mimeType)
   }
   const blob = await res.blob()
   const header = new Uint8Array(await blob.slice(0, 8).arrayBuffer())
@@ -410,7 +429,7 @@ function AuthorPreview (): JSX.Element {
     let live = true
     setImageUrl(null)
     setMessage('Loading preview...')
-    void authFetch(`${API}/me/publications/${id}/pages/${currentPage}`)
+    void authFetch(withFormatJson(`${API}/me/publications/${id}/pages/${currentPage}`))
       .then(async res => await responseToPngBlob(res, 'Preview failed'))
       .then(blob => {
         if (!live) return

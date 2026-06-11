@@ -118,8 +118,16 @@ async function canManagePublication (identityKey: string, publication: any): Pro
   return publication.author_identity_key === identityKey || await isAdmin(identityKey)
 }
 
-async function sendPngFile (res: Response, filePath: string): Promise<void> {
+async function sendPngResponse (req: Request, res: Response, filePath: string): Promise<void> {
   const image = await fs.readFile(filePath)
+  if (req.query.format === 'json') {
+    res.json({
+      status: 'success',
+      mimeType: 'image/png',
+      dataBase64: image.toString('base64')
+    })
+    return
+  }
   res.setHeader('Content-Type', 'image/png')
   res.send(image)
 }
@@ -242,7 +250,7 @@ async function sendPublicationPageImage (publication: any, pageNumber: number, r
     return
   }
   res.setHeader('Cache-Control', 'private, max-age=60')
-  await sendPngFile(res, page.image_path)
+  await sendPngResponse(req, res, page.image_path)
 }
 
 async function sendPageImage (req: Request, res: Response): Promise<void> {
