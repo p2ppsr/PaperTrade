@@ -528,6 +528,8 @@ function Author ({ status }: { status: Status | null }): JSX.Element {
     const publicationsJson = await publicationsRes.json()
     const ledgerJson = await ledgerRes.json()
     if (!profileRes.ok) throw new Error(profileJson.message ?? 'Could not load profile')
+    if (!publicationsRes.ok) throw new Error(publicationsJson.message ?? 'Could not load publications')
+    if (!ledgerRes.ok) throw new Error(ledgerJson.message ?? 'Could not load author ledger')
     const loaded = profileJson.profile
     setProfile({
       displayName: loaded?.display_name ?? '',
@@ -718,11 +720,14 @@ function Admin (): JSX.Element {
     const pubJson = await pubRes.json()
     const ledgerJson = await ledgerRes.json()
     const paymentJson = await paymentRes.json()
+    if (!pubRes.ok) throw new Error(pubJson.message ?? 'Could not load publication review')
+    if (!ledgerRes.ok) throw new Error(ledgerJson.message ?? 'Could not load ledger')
+    if (!paymentRes.ok) throw new Error(paymentJson.message ?? 'Could not load payments')
     setPublications(pubJson.publications ?? [])
     setAuthorBalances(ledgerJson.authorBalances ?? [])
     setPayouts(paymentJson.payouts ?? [])
   }
-  useEffect(() => { void refresh().catch(() => undefined) }, [])
+  useEffect(() => { void refresh().catch(err => setMessage(friendlyErrorMessage(err, 'Could not load admin workspace'))) }, [])
   const review = async (id: string, action: 'publish' | 'reject'): Promise<void> => {
     const res = await authFetch(`${API}/admin/publications/${id}/review`, {
       method: 'POST',
