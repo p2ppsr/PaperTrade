@@ -3,7 +3,7 @@ import { createRoot } from 'react-dom/client'
 import { BrowserRouter, Link, Route, Routes, useLocation, useNavigate, useParams } from 'react-router-dom'
 import { AuthFetch, Utils, WalletClient } from '@bsv/sdk'
 import { IdentityCard } from '@bsv/identity-react'
-import { BookOpen, Check, ExternalLink, FileText, Home, Library, MessageCircle, Monitor, RefreshCw, Settings, Smartphone, Upload, User } from 'lucide-react'
+import { BookOpen, Check, ExternalLink, FileText, Github, Home, Info, Library, MessageCircle, Monitor, RefreshCw, Settings, Share2, Smartphone, Upload, User } from 'lucide-react'
 import './styles.css'
 
 type WalletSubstrate = 'auto' | 'json-api' | 'secure-json-api' | 'react-native' | 'Cicada' | 'XDM' | 'window.CWI'
@@ -84,6 +84,7 @@ const METANET_EXPLORER_IOS_URL = 'https://apps.apple.com/us/app/metanet-explorer
 const METANET_EXPLORER_ANDROID_URL = 'https://play.google.com/store/apps/details?id=app.metanet.explorer'
 const BSV_BROWSER_ANDROID_URL = 'https://play.google.com/store/apps/details?id=org.bsvassociation.browser'
 const BSV_BROWSER_URL = 'https://desktop.bsvb.tech/'
+const PAPERTRADE_GITHUB_URL = 'https://github.com/p2ppsr/PaperTrade'
 const WALLET_TIMEOUT_MS = 20000
 let walletRequestQueue: Promise<unknown> = Promise.resolve()
 
@@ -147,6 +148,22 @@ async function uploadJsonFile (url: string, file: File): Promise<Response> {
 
 function paymentUnitLabel (unit: 'sats' | 'usd_cents'): string {
   return unit === 'usd_cents' ? 'USD cents' : 'sats'
+}
+
+function setClientMeta (title: string, description: string): void {
+  document.title = title
+  const descriptionTag = document.querySelector<HTMLMetaElement>('meta[name="description"]')
+  if (descriptionTag != null) descriptionTag.content = description
+}
+
+async function sharePaperTrade ({ title, text, path }: { title: string, text: string, path: string }): Promise<string> {
+  const url = new URL(path, window.location.origin).toString()
+  if (typeof navigator.share === 'function') {
+    await navigator.share({ title, text, url })
+    return 'Shared.'
+  }
+  await navigator.clipboard.writeText(url)
+  return 'Link copied.'
 }
 
 async function authFetch (url: string, init?: RequestInit): Promise<Response> {
@@ -452,6 +469,24 @@ function FeedbackPanel ({ surface }: { surface: string }): JSX.Element {
   )
 }
 
+function ShareButton ({ title, text, path }: { title: string, text: string, path: string }): JSX.Element {
+  const [message, setMessage] = useState('')
+  return (
+    <span className='share-wrap'>
+      <button
+        className='button secondary'
+        type='button'
+        onClick={() => {
+          void sharePaperTrade({ title, text, path }).then(setMessage).catch(err => setMessage(err instanceof Error ? err.message : 'Could not share link'))
+        }}
+      >
+        <Share2 size={18} /> Share
+      </button>
+      {message !== '' && <small>{message}</small>}
+    </span>
+  )
+}
+
 function Analytics ({ status }: { status: Status | null }): null {
   const location = useLocation()
   useEffect(() => {
@@ -484,6 +519,7 @@ function Shell ({ children, status }: { children: React.ReactNode, status: Statu
           <Link to='/'><Home size={18} /> Newsstand</Link>
           <Link to='/author'><User size={18} /> Author</Link>
           <Link to='/admin'><Settings size={18} /> Admin</Link>
+          <Link to='/about'><Info size={18} /> About</Link>
         </nav>
         <div className='status-line'>
           <span>{status?.setupComplete === true ? 'Live server' : 'Setup required'}</span>
@@ -498,6 +534,7 @@ function Shell ({ children, status }: { children: React.ReactNode, status: Statu
 function Newsstand (): JSX.Element {
   const [publications, setPublications] = useState<Publication[]>([])
   useEffect(() => {
+    setClientMeta('PaperTrade | BSV per-page publishing newsstand', 'Read page 1 free. Pay per page after that with a BRC100 wallet.')
     void fetch(`${API}/publications`).then(async res => await res.json()).then(json => {
       const rows = json.publications ?? []
       setPublications(rows)
@@ -541,10 +578,13 @@ function PublicationDetail (): JSX.Element {
   const { id = '' } = useParams()
   const [publication, setPublication] = useState<Publication | null>(null)
   useEffect(() => {
-    void fetch(`${API}/publications/${id}`).then(async res => await res.json()).then(json => {
+    void fetch(`${API}/publications/${id}`).then(async res => await res.json()).then((json: { publication?: Publication | null }) => {
       const loaded = json.publication ?? null
       setPublication(loaded)
-      if (loaded != null) postSignal('publication.view', usercomMetadata({ surface: 'publication', tags: ['reader'], context: { publicationId: id, pageCount: loaded.pageCount } }))
+      if (loaded != null) {
+        setClientMeta(`${loaded.title} | PaperTrade`, loaded.description ?? 'Read this publication on PaperTrade.')
+        postSignal('publication.view', usercomMetadata({ surface: 'publication', tags: ['reader'], context: { publicationId: id, pageCount: loaded.pageCount } }))
+      }
     })
   }, [id])
   if (publication == null) return <section className='surface'><p>Loading publication...</p></section>
@@ -555,6 +595,7 @@ function PublicationDetail (): JSX.Element {
           <h1>{publication.title}</h1>
           <p>{publication.description}</p>
         </div>
+        <ShareButton title={publication.title} text={publication.description ?? 'Read this PaperTrade publication.'} path={`/publication/${publication.id}`} />
       </header>
       <div className='facts'>
         <IdentityPill identityKey={publication.authorIdentityKey} label={publication.authorName} />
@@ -1227,6 +1268,73 @@ function Admin (): JSX.Element {
   )
 }
 
+function About ({ status }: { status: Status | null }): JSX.Element {
+  const walletOptions = platformWalletOptions()
+  useEffect(() => {
+    setClientMeta('About PaperTrade | BSV per-page publishing', 'PaperTrade is an open-source BSV newsstand for per-page writing, BRC100 wallet onboarding, author payouts, and self-hosted publishing servers.')
+  }, [])
+  return (
+    <section className='surface about-surface'>
+      <header className='page-head about-head'>
+        <div>
+          <span className='step-label'>Open BSV newsstand</span>
+          <h1>PaperTrade lets writing sell one page at a time.</h1>
+          <p>Readers preview the first page free, then use a BRC100 wallet for small per-page payments. Authors keep a server-side balance and can receive wallet payouts from their author workspace.</p>
+        </div>
+        <ShareButton title='PaperTrade' text='A BSV per-page publishing newsstand.' path='/about' />
+      </header>
+
+      <div className='about-grid'>
+        <section className='tool-panel about-panel'>
+          <BookOpen size={24} />
+          <h2>For readers</h2>
+          <p>Start at the newsstand, read page 1, then continue in a compatible wallet browser when a paid page asks for authentication and payment.</p>
+          <Link className='button' to='/'>Open newsstand</Link>
+        </section>
+        <section className='tool-panel about-panel'>
+          <User size={24} />
+          <h2>For authors</h2>
+          <p>Your BRC100 identity key is your account. Create an author profile, upload a PDF, docx, or ePub, preview rendered pages, and manage payouts.</p>
+          <Link className='button' to='/author'>Author workspace</Link>
+        </section>
+        <section className='tool-panel about-panel'>
+          <Settings size={24} />
+          <h2>For operators</h2>
+          <p>Run a private or public-submission PaperTrade server with editorial review, server-wide pricing, commission settings, and audited wallet balances.</p>
+          <a className='button secondary' href={PAPERTRADE_GITHUB_URL} target='_blank' rel='noreferrer'><Github size={18} /> Deploy your own</a>
+        </section>
+      </div>
+
+      <section className='tool-panel publication-list'>
+        <h2>Compatible wallets</h2>
+        <div className='wallet-options'>
+          {walletOptions.map(option => (
+            <a className='wallet-option' href={option.href} target='_blank' rel='noreferrer' key={option.label}>
+              {option.icon === 'phone' ? <Smartphone size={20} /> : <Monitor size={20} />}
+              <span>
+                <strong>{option.label}</strong>
+                <small>{option.description}</small>
+              </span>
+              <ExternalLink size={16} />
+            </a>
+          ))}
+        </div>
+      </section>
+
+      <section className='tool-panel publication-list'>
+        <h2>Server contract</h2>
+        <div className='contract-grid'>
+          <a href='/manifest.json' target='_blank' rel='noreferrer'>PWA manifest</a>
+          <a href='/wallet-manifest.json' target='_blank' rel='noreferrer'>Wallet manifest</a>
+          <a href='/.well-known/wallet-manifest.json' target='_blank' rel='noreferrer'>Well-known wallet manifest</a>
+          <a href='/sitemap.xml' target='_blank' rel='noreferrer'>Sitemap</a>
+        </div>
+        <p className='hint'>This server is {status?.setupComplete === true ? 'configured' : 'awaiting setup'} and currently runs in {status?.mode === 'public_submissions' ? 'public submission' : 'private publishing'} mode.</p>
+      </section>
+    </section>
+  )
+}
+
 function AppRoutes ({ status, refresh }: { status: Status | null, refresh: () => Promise<void> }): JSX.Element {
   const location = useLocation()
   const needsSetup = useMemo(() => status != null && !status.setupComplete, [status])
@@ -1245,6 +1353,7 @@ function AppRoutes ({ status, refresh }: { status: Status | null, refresh: () =>
         <Route path='/admin' element={<Admin />} />
         <Route path='/admin/read/:id/:pageNumber' element={<AuthorPreview />} />
         <Route path='/setup' element={<Setup status={status} refresh={refresh} />} />
+        <Route path='/about' element={<About status={status} />} />
       </Routes>
     </Shell>
   )
@@ -1262,3 +1371,9 @@ function App (): JSX.Element {
 const root = document.getElementById('root')
 if (root == null) throw new Error('Root element not found')
 createRoot(root).render(<App />)
+
+if ('serviceWorker' in navigator && window.location.protocol === 'https:') {
+  window.addEventListener('load', () => {
+    void navigator.serviceWorker.register('/sw.js').catch(() => undefined)
+  })
+}

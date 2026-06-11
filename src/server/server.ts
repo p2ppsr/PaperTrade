@@ -15,6 +15,7 @@ import { asPositiveInteger, splitCommission } from './money.js'
 import { createServerWallet, replacePersistedServerKey } from './wallet.js'
 import { getPublicationDir, processPublicationFile } from './content.js'
 import { STARTER_AUTHOR_NAME, STARTER_WORKS, type StarterWork, writeStarterPdf } from './starterWorks.js'
+import { appManifest, metaForPath, renderHtmlShell, robotsTxt, sitemapXml, walletManifest, type PublicPublicationMeta } from './web.js'
 
 const serverDirname = path.dirname(fileURLToPath(import.meta.url))
 const HTTP_PORT = Number(process.env.HTTP_PORT ?? process.env.PORT ?? '3001')
@@ -346,6 +347,49 @@ function publicPublicationFields (row: any): Record<string, unknown> {
     publishedAt: row.published_at,
     coverUrl: `${ROUTING_PREFIX}/publications/${String(row.id)}/cover`
   }
+}
+
+function publicPublicationMetaFields (row: any): PublicPublicationMeta {
+  return {
+    id: String(row.id),
+    title: String(row.title),
+    description: row.description,
+    authorName: row.display_name,
+    pageCount: Number(row.page_count),
+    publishedAt: row.published_at,
+    coverUrl: `${ROUTING_PREFIX}/publications/${String(row.id)}/cover`
+  }
+}
+
+async function getPublishedPublicationMeta (publicationId: string): Promise<PublicPublicationMeta | null> {
+  const row = await db('publications')
+    .join('authors', 'authors.identity_key', 'publications.author_identity_key')
+    .where('publications.id', publicationId)
+    .where('publications.status', 'published')
+    .select('publications.*', 'authors.display_name')
+    .first()
+  return row == null ? null : publicPublicationMetaFields(row)
+}
+
+async function listPublishedPublicationMeta (): Promise<PublicPublicationMeta[]> {
+  const rows = await db('publications')
+    .join('authors', 'authors.identity_key', 'publications.author_identity_key')
+    .where('publications.status', 'published')
+    .select('publications.*', 'authors.display_name')
+    .orderBy('publications.published_at', 'desc')
+  return rows.map(publicPublicationMetaFields)
+}
+
+function appRoutePath (pathName: string): boolean {
+  return pathName === '/' ||
+    pathName === '/about' ||
+    pathName === '/author' ||
+    pathName === '/admin' ||
+    pathName === '/setup' ||
+    /^\/publication\/[^/]+$/.test(pathName) ||
+    /^\/read\/[^/]+\/[0-9]+$/.test(pathName) ||
+    /^\/author\/read\/[^/]+\/[0-9]+$/.test(pathName) ||
+    /^\/admin\/read\/[^/]+\/[0-9]+$/.test(pathName)
 }
 
 async function processAndStorePublicationUpload (
@@ -1410,9 +1454,50 @@ async function createApp (): Promise<express.Express> {
   app.use(ROUTING_PREFIX, api)
 
   const clientRoot = path.resolve(serverDirname, '../../build')
-  app.use(express.static(clientRoot))
-  app.get(['/', '/publication/:id', '/read/:id/:pageNumber', '/author', '/author/read/:id/:pageNumber', '/admin', '/setup'], (_req, res) => {
-    res.sendFile(path.join(clientRoot, 'index.html'))
+  let cachedIndexHtml: string | null = null
+  async function indexHtml (): Promise<string> {
+    if (cachedIndexHtml != null) return cachedIndexHtml
+    cachedIndexHtml = await fs.readFile(path.join(clientRoot, 'index.html'), 'utf8')
+    return cachedIndexHtml
+  }
+
+  app.get('/manifest.json', (_req, res) => {
+    res.type('application/manifest+json').json(appManifest())
+  })
+
+  app.get(['/wallet-manifest.json', '/.well-known/wallet-manifest.json'], (_req, res) => {
+    res.json(walletManifest(walletBootstrap.publicKey))
+  })
+
+  app.get(`${ROUTING_PREFIX}/wallet/manifest`, (_req, res) => {
+    res.json(walletManifest(walletBootstrap.publicKey))
+  })
+
+  app.get('/robots.txt', (_req, res) => {
+    res.type('text/plain').send(robotsTxt())
+  })
+
+  app.get('/sitemap.xml', async (_req, res, next) => {
+    try {
+      res.type('application/xml').send(sitemapXml(await listPublishedPublicationMeta()))
+    } catch (err) {
+      next(err)
+    }
+  })
+
+  app.use(express.static(clientRoot, { index: false, maxAge: '1h' }))
+  app.get('*', async (req, res, next) => {
+    try {
+      if (!['GET', 'HEAD'].includes(req.method) || !appRoutePath(req.path)) {
+        next()
+        return
+      }
+      const publicationId = req.path.match(/^\/publication\/([^/]+)$/)?.[1]
+      const publication = publicationId == null ? null : await getPublishedPublicationMeta(publicationId)
+      res.type('html').send(renderHtmlShell(await indexHtml(), metaForPath(req.path, publication)))
+    } catch (err) {
+      next(err)
+    }
   })
 
   app.use((err: Error, req: Request, res: Response, _next: NextFunction) => {

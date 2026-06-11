@@ -1,0 +1,32 @@
+{
+  "name": "PaperTrade",
+  "short_name": "PaperTrade",
+  "version": "0.1.0",
+  "homepage_url": "https://papertrade.metanet.app",
+  "app_url": "https://papertrade.metanet.app",
+  "support_url": "https://usercom.babbage.systems/",
+  "repository_url": "https://github.com/p2ppsr/PaperTrade",
+  "icon_url": "https://papertrade.metanet.app/icon.svg",
+  "brcs": ["BRC-100", "BRC-29", "BRC-73", "BRC-116"],
+  "permissions": {
+    "metanet": {
+      "groupPermissions": {
+        "protocolPermissions": [
+          { "protocolID": [1, "identity key retrieval"], "description": "Identify the reader, author, or admin without passwords." },
+          { "protocolID": [2, "auth message signature"], "counterparty": "self", "description": "Sign authenticated API requests to the PaperTrade server." },
+          { "protocolID": [2, "3241645161d8"], "counterparty": "self", "description": "Receive PaperTrade author payouts using BRC29 payment remittance." },
+          { "protocolID": [1, "action label papertrade"], "description": "Label PaperTrade page payments, funding payments, and author payouts." },
+          { "protocolID": [1, "identity resolution"], "description": "Resolve author identity keys into user-friendly identity cards." }
+        ],
+        "spendingAuthorization": {
+          "amount": 100000,
+          "description": "Authorize small per-page reading payments and optional server funding payments."
+        },
+        "basketAccess": [
+          { "basket": "papertrade-payouts", "description": "Track incoming PaperTrade author payout transactions." }
+        ],
+        "certificateFieldAccess": []
+      }
+    }
+  }
+}

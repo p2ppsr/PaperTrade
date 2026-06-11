@@ -433,6 +433,18 @@ h1 {
   margin-top: 20px;
 }
 
+.share-wrap {
+  align-items: center;
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.share-wrap small {
+  color: #5c6570;
+  font-weight: 700;
+}
+
 .feedback-panel h2 {
   align-items: center;
   display: flex;
@@ -497,6 +509,61 @@ h1 {
 .wallet-option strong,
 .wallet-option small {
   overflow-wrap: anywhere;
+}
+
+.about-surface {
+  max-width: 1120px;
+}
+
+.about-head p {
+  color: #4c514c;
+  font-size: 18px;
+  line-height: 1.45;
+  max-width: 760px;
+}
+
+.about-grid {
+  display: grid;
+  gap: 18px;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.about-panel {
+  align-content: start;
+  display: grid;
+  gap: 12px;
+}
+
+.about-panel h2 {
+  margin-bottom: 0;
+}
+
+.about-panel p {
+  color: #4c514c;
+  line-height: 1.45;
+}
+
+.about-panel svg {
+  color: #1f4f46;
+}
+
+.contract-grid {
+  display: grid;
+  gap: 10px;
+  grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+}
+
+.contract-grid a {
+  background: #f8fafb;
+  border: 1px solid #d6dde2;
+  border-radius: 8px;
+  color: #1f4f46;
+  font-weight: 800;
+  padding: 12px;
+}
+
+.contract-grid a:hover {
+  background: #edf4f2;
 }
 
 .wallet-actions {
@@ -681,7 +748,7 @@ h1 {
   nav {
     display: grid;
     gap: 6px;
-    grid-template-columns: repeat(3, minmax(0, 1fr));
+    grid-template-columns: repeat(4, minmax(0, 1fr));
     overflow: hidden;
   }
 
@@ -777,6 +844,10 @@ h1 {
     grid-template-columns: 1fr;
   }
 
+  .about-grid {
+    grid-template-columns: 1fr;
+  }
+
   .review-main {
     grid-template-columns: 1fr;
   }
@@ -813,12 +884,14 @@ h1 {
   }
 
   nav a {
-    font-size: 13px;
+    font-size: 12px;
+    gap: 4px;
+    padding: 0 4px;
   }
 
   nav a svg {
-    height: 17px;
-    width: 17px;
+    height: 16px;
+    width: 16px;
   }
 
   h1 {

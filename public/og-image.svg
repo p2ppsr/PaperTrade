@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 630" role="img" aria-label="PaperTrade preview">
+  <rect width="1200" height="630" fill="#f7f5ef"/>
+  <rect x="70" y="70" width="1060" height="490" rx="30" fill="#fffdf8" stroke="#ded8c8" stroke-width="4"/>
+  <path d="M152 166v250M216 166v250M280 190v202M344 212l46 160" fill="none" stroke="#1f4f46" stroke-width="34" stroke-linecap="round"/>
+  <text x="458" y="245" fill="#20231f" font-family="Inter, ui-sans-serif, system-ui, -apple-system, Segoe UI, sans-serif" font-size="88" font-weight="800">PaperTrade</text>
+  <text x="462" y="330" fill="#4c514c" font-family="Inter, ui-sans-serif, system-ui, -apple-system, Segoe UI, sans-serif" font-size="38" font-weight="650">Read page 1 free. Pay per page after that.</text>
+  <rect x="462" y="382" width="352" height="68" rx="12" fill="#1f4f46"/>
+  <text x="492" y="428" fill="#ffffff" font-family="Inter, ui-sans-serif, system-ui, -apple-system, Segoe UI, sans-serif" font-size="30" font-weight="800">BSV content newsstand</text>
+</svg>

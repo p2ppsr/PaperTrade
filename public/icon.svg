@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-label="PaperTrade">
+  <rect width="512" height="512" rx="96" fill="#f0ebdc"/>
+  <rect x="54" y="54" width="404" height="404" rx="74" fill="#fffdf8" stroke="#ded8c8" stroke-width="10"/>
+  <path d="M124 132v248M188 132v248M252 150v212M316 168l46 176" fill="none" stroke="#1f4f46" stroke-width="34" stroke-linecap="round"/>
+  <path d="M120 408h272" stroke="#20231f" stroke-width="24" stroke-linecap="round"/>
+</svg>
