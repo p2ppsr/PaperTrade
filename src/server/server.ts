@@ -33,6 +33,7 @@ const WALLET_BALANCE_BASKET = '893b7646de0e1c9f741bd6e9169b76a8847ae34adef7bef1e
 interface AuthenticatedRequest extends Request {
   auth?: { identityKey: string }
   payment?: { satoshisPaid: number, accepted?: boolean, tx?: string }
+  requestId?: string
 }
 
 interface JsonUploadBody {
@@ -72,9 +73,97 @@ interface AuthorPayoutPayload {
   status: string
 }
 
+interface ClientTelemetryEvent {
+  name?: unknown
+  severity?: unknown
+  anonymousId?: unknown
+  sessionId?: unknown
+  route?: unknown
+  path?: unknown
+  referrer?: unknown
+  userAgent?: unknown
+  platform?: unknown
+  connectionType?: unknown
+  durationMs?: unknown
+  releaseVersion?: unknown
+  occurredAt?: unknown
+  context?: unknown
+}
+
 function identityKeyOf (req: Request): string | undefined {
   const identityKey = (req as AuthenticatedRequest).auth?.identityKey
   return identityKey === 'unknown' ? undefined : identityKey
+}
+
+function textField (value: unknown, maxLength: number): string | null {
+  if (typeof value !== 'string') return null
+  const text = value.replace(/\s+/g, ' ').trim()
+  if (text === '') return null
+  return text.slice(0, maxLength)
+}
+
+function eventSeverity (value: unknown): 'info' | 'warn' | 'error' | 'fatal' {
+  return value === 'fatal' || value === 'error' || value === 'warn' ? value : 'info'
+}
+
+function safeNumber (value: unknown): number | null {
+  const numeric = Number(value)
+  if (!Number.isFinite(numeric) || numeric < 0) return null
+  return Math.min(Math.round(numeric), 24 * 60 * 60 * 1000)
+}
+
+function safeOccurredAt (value: unknown): Date | null {
+  if (typeof value !== 'string') return null
+  const date = new Date(value)
+  return Number.isNaN(date.getTime()) ? null : date
+}
+
+function sanitizeTelemetryContext (value: unknown, depth = 0): unknown {
+  if (value == null) return null
+  if (depth > 3) return '[truncated]'
+  if (typeof value === 'string') return value.slice(0, 800)
+  if (typeof value === 'number') return Number.isFinite(value) ? value : null
+  if (typeof value === 'boolean') return value
+  if (Array.isArray(value)) return value.slice(0, 20).map(item => sanitizeTelemetryContext(item, depth + 1))
+  if (typeof value === 'object') {
+    const safe: Record<string, unknown> = {}
+    for (const [key, raw] of Object.entries(value as Record<string, unknown>).slice(0, 40)) {
+      const normalizedKey = key.replace(/[^a-zA-Z0-9_.:-]/g, '_').slice(0, 80)
+      const lower = normalizedKey.toLowerCase()
+      if (lower.includes('tx') || lower.includes('beef') || lower.includes('password') || lower.includes('secret') || lower.includes('private') || lower.includes('token') || lower.includes('signature')) {
+        safe[normalizedKey] = '[redacted]'
+      } else {
+        safe[normalizedKey] = sanitizeTelemetryContext(raw, depth + 1)
+      }
+    }
+    return safe
+  }
+  return String(value).slice(0, 200)
+}
+
+async function recordClientTelemetry (req: Request, event: ClientTelemetryEvent): Promise<string> {
+  const id = randomUUID()
+  const context = sanitizeTelemetryContext(event.context ?? {})
+  await db('client_events').insert({
+    id,
+    event_name: textField(event.name, 120) ?? 'client.unknown',
+    severity: eventSeverity(event.severity),
+    anonymous_id: textField(event.anonymousId, 80),
+    session_id: textField(event.sessionId, 80),
+    identity_key: identityKeyOf(req) ?? null,
+    route: textField(event.route, 260),
+    path: textField(event.path, 260),
+    referrer: textField(event.referrer, 1024),
+    user_agent: textField(event.userAgent, 1024) ?? textField(req.header('user-agent'), 1024),
+    platform: textField(event.platform, 80),
+    connection_type: textField(event.connectionType, 80),
+    duration_ms: safeNumber(event.durationMs),
+    release_version: textField(event.releaseVersion, 80),
+    request_id: (req as AuthenticatedRequest).requestId ?? null,
+    occurred_at: safeOccurredAt(event.occurredAt),
+    context: JSON.stringify(context)
+  })
+  return id
 }
 
 function requireAuth (req: Request, res: Response, next: NextFunction): void {
@@ -785,16 +874,24 @@ async function createApp (): Promise<express.Express> {
   const app = express()
   app.disable('x-powered-by')
   app.use((req, res, next) => {
+    const requestId = randomUUID()
+    ;(req as AuthenticatedRequest).requestId = requestId
+    res.setHeader('X-PaperTrade-Request-Id', requestId)
     const startedAt = Date.now()
     res.on('finish', () => {
-      if (req.path.startsWith(ROUTING_PREFIX) && res.statusCode >= 400) {
-        console.warn(JSON.stringify({
-          level: 'warn',
+      const durationMs = Date.now() - startedAt
+      if (req.path.startsWith(ROUTING_PREFIX) && (res.statusCode >= 400 || durationMs > 8000)) {
+        const level = res.statusCode >= 500 ? 'error' : 'warn'
+        console[level](JSON.stringify({
+          level,
           service: 'papertrade',
+          event: durationMs > 8000 ? 'api_slow_or_failed' : 'api_failed',
+          requestId,
           method: req.method,
           path: req.path,
           statusCode: res.statusCode,
-          durationMs: Date.now() - startedAt
+          durationMs,
+          identityKey: identityKeyOf(req)
         }))
       }
     })
@@ -841,6 +938,21 @@ async function createApp (): Promise<express.Express> {
   })
 
   const api = express.Router()
+
+  api.post('/telemetry', async (req, res, next) => {
+    try {
+      const events = Array.isArray(req.body?.events) ? req.body.events : [req.body]
+      const accepted: string[] = []
+      for (const raw of events.slice(0, 25)) {
+        if (raw != null && typeof raw === 'object') {
+          accepted.push(await recordClientTelemetry(req, raw as ClientTelemetryEvent))
+        }
+      }
+      res.json({ status: 'success', accepted: accepted.length, ids: accepted })
+    } catch (err) {
+      next(err)
+    }
+  })
 
   api.get('/status', async (req, res) => {
     const identityKey = identityKeyOf(req)
@@ -1532,6 +1644,23 @@ async function createApp (): Promise<express.Express> {
     res.json({ status: 'success', payments, payouts })
   })
 
+  api.get('/admin/telemetry', requireAdmin, async (req, res) => {
+    const severity = typeof req.query.severity === 'string' ? req.query.severity : undefined
+    let query = db('client_events').orderBy('received_at', 'desc').limit(250)
+    if (severity === 'warn' || severity === 'error' || severity === 'fatal') {
+      query = query.where({ severity })
+    }
+    const events = await query
+    const summaryRows = await db('client_events')
+      .select('event_name', 'severity')
+      .count<{ count: number }>({ count: '*' })
+      .where('received_at', '>', db.raw('DATE_SUB(NOW(), INTERVAL 24 HOUR)'))
+      .groupBy('event_name', 'severity')
+      .orderBy('count', 'desc')
+      .limit(40)
+    res.json({ status: 'success', events, summary: summaryRows })
+  })
+
   api.post('/admin/payouts', requireAdmin, async (req, res) => {
     const authorIdentityKey = String(req.body.authorIdentityKey ?? '').trim()
     const amountSats = asPositiveInteger(req.body.amountSats, 0)
@@ -1656,8 +1785,11 @@ async function createApp (): Promise<express.Express> {
     console.error(JSON.stringify({
       level: 'error',
       service: 'papertrade',
+      event: 'api_exception',
+      requestId: (req as AuthenticatedRequest).requestId,
       method: req.method,
       path: req.path,
+      identityKey: identityKeyOf(req),
       message: err.message,
       stack: err.stack
     }))

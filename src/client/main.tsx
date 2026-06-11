@@ -3,7 +3,7 @@ import { createRoot } from 'react-dom/client'
 import { BrowserRouter, Link, Route, Routes, useLocation, useNavigate, useParams } from 'react-router-dom'
 import { AuthFetch, Utils, WalletClient } from '@bsv/sdk'
 import { IdentityCard } from '@bsv/identity-react'
-import { BookOpen, Check, ExternalLink, FileText, Github, Home, Image, Info, Library, MessageCircle, Monitor, Palette, RefreshCw, Settings, Share2, Smartphone, Upload, User } from 'lucide-react'
+import { Activity, BookOpen, Check, ExternalLink, FileText, Github, Home, Image, Info, Library, MessageCircle, Monitor, Palette, RefreshCw, Settings, Share2, Smartphone, Upload, User } from 'lucide-react'
 import './styles.css'
 
 type WalletSubstrate = 'auto' | 'json-api' | 'secure-json-api' | 'react-native' | 'Cicada' | 'XDM' | 'window.CWI'
@@ -94,6 +94,22 @@ interface ServerWallet {
   balanceSats: number
 }
 
+interface ClientEvent {
+  id: string
+  event_name: string
+  severity: 'info' | 'warn' | 'error' | 'fatal'
+  session_id?: string | null
+  identity_key?: string | null
+  route?: string | null
+  path?: string | null
+  platform?: string | null
+  connection_type?: string | null
+  duration_ms?: number | null
+  request_id?: string | null
+  received_at?: string
+  context?: string | null
+}
+
 interface AdminSettings {
   mode: 'private_publish' | 'public_submissions'
   pricePerPageSats: number
@@ -105,9 +121,11 @@ interface AdminSettings {
 const API = '/api'
 const WALLET_ORIGINATOR = (import.meta as any).env?.VITE_WALLET_ORIGINATOR ?? window.location.hostname
 const WALLET_SUBSTRATE_OVERRIDE = (import.meta as any).env?.VITE_WALLET_SUBSTRATE as string | undefined
+const APP_RELEASE = (import.meta as any).env?.VITE_APP_VERSION ?? 'browser'
 const USERCOM_SOURCE = 'papertrade'
 const USERCOM_SUBMIT_ENDPOINT = 'https://usercom.babbage.systems/submit'
 const USERCOM_SIGNAL_ENDPOINT = 'https://usercom.babbage.systems/signal'
+const TELEMETRY_ENDPOINT = `${API}/telemetry`
 const GET_METANET_DOWNLOADS_URL = 'https://getmetanet.com/downloads'
 const METANET_EXPLORER_IOS_URL = 'https://apps.apple.com/us/app/metanet-explorer/id6752445658'
 const METANET_EXPLORER_ANDROID_URL = 'https://play.google.com/store/apps/details?id=app.metanet.explorer'
@@ -241,12 +259,37 @@ async function sharePaperTrade ({ title, text, path }: { title: string, text: st
 
 async function authFetch (url: string, init?: RequestInit): Promise<Response> {
   const request = async (): Promise<Response> => {
+    const startedAt = performance.now()
+    const requestUrl = absoluteRequestUrl(url)
+    const method = init?.method ?? 'GET'
+    postTelemetry('wallet.request_started', 'info', {
+      context: { method, url: new URL(requestUrl).pathname }
+    })
     const wallet = getWallet()
     const fetcher = new AuthFetch(wallet, undefined, undefined, WALLET_ORIGINATOR)
     try {
-      return await fetcher.fetch(absoluteRequestUrl(url), init as any)
+      const response = await fetcher.fetch(requestUrl, init as any)
+      postTelemetry(response.ok ? 'wallet.request_finished' : 'wallet.request_http_error', response.ok ? 'info' : 'warn', {
+        durationMs: performance.now() - startedAt,
+        requestId: response.headers.get('x-papertrade-request-id'),
+        context: {
+          method,
+          url: new URL(requestUrl).pathname,
+          status: response.status
+        }
+      })
+      return response
     } catch (err) {
-      throw normalizeWalletTransportError(err)
+      const normalized = normalizeWalletTransportError(err)
+      postTelemetry('wallet.request_failed', 'error', {
+        durationMs: performance.now() - startedAt,
+        context: {
+          method,
+          url: new URL(requestUrl).pathname,
+          message: normalized.message
+        }
+      })
+      throw normalized
     }
   }
   const next = walletRequestQueue.then(request, request)
@@ -258,6 +301,7 @@ async function withWalletTimeout<T> (promise: Promise<T>, action: string): Promi
   let timeoutId: number | undefined
   const timeout = new Promise<never>((_resolve, reject) => {
     timeoutId = window.setTimeout(() => {
+      postTelemetry('wallet.request_timeout', 'error', { context: { action } })
       reject(new Error(`Wallet request timed out while trying to ${action}. Check that your BRC100 wallet is open and approve the request, then retry.`))
     }, WALLET_TIMEOUT_MS)
   })
@@ -323,11 +367,23 @@ function randomId (): string {
 }
 
 function getStoredId (storage: Storage, key: string): string {
-  const existing = storage.getItem(key)
-  if (existing != null && existing !== '') return existing
   const id = randomId()
-  storage.setItem(key, id)
+  try {
+    const existing = storage.getItem(key)
+    if (existing != null && existing !== '') return existing
+    storage.setItem(key, id)
+  } catch {
+    return id
+  }
   return id
+}
+
+function anonymousId (): string {
+  return getStoredId(window.localStorage, 'papertrade_anonymous_id')
+}
+
+function sessionId (): string {
+  return getStoredId(window.sessionStorage, 'papertrade_session_id')
 }
 
 function tagValue (value: string): string {
@@ -336,6 +392,57 @@ function tagValue (value: string): string {
 
 function cleanContext (context: Record<string, unknown>): Record<string, unknown> {
   return Object.fromEntries(Object.entries(context).filter(([, value]) => value !== undefined && value !== null && value !== ''))
+}
+
+function connectionType (): string | undefined {
+  const connection = (navigator as Navigator & { connection?: { effectiveType?: string, type?: string } }).connection
+  return connection?.effectiveType ?? connection?.type
+}
+
+function postTelemetry (
+  name: string,
+  severity: 'info' | 'warn' | 'error' | 'fatal' = 'info',
+  metadata: { durationMs?: number, requestId?: string | null, context?: Record<string, unknown> } = {}
+): void {
+  try {
+    const payload = {
+      name,
+      severity,
+      anonymousId: anonymousId(),
+      sessionId: sessionId(),
+      route: window.location.pathname,
+      path: `${window.location.pathname}${window.location.search}`,
+      referrer: document.referrer === '' ? undefined : document.referrer,
+      userAgent: window.navigator.userAgent,
+      platform: window.navigator.platform,
+      connectionType: connectionType(),
+      durationMs: metadata.durationMs,
+      requestId: metadata.requestId,
+      releaseVersion: APP_RELEASE,
+      occurredAt: new Date().toISOString(),
+      context: cleanContext({
+        viewportWidth: window.innerWidth,
+        viewportHeight: window.innerHeight,
+        devicePixelRatio: window.devicePixelRatio,
+        online: navigator.onLine,
+        walletSubstrate: getWalletSubstrate(),
+        hasReactNativeWalletBridge: hasReactNativeWalletBridge(),
+        hasWindowCwiWalletBridge: hasWindowCwiWalletBridge(),
+        ...metadata.context
+      })
+    }
+    const body = JSON.stringify(payload)
+    if (navigator.sendBeacon != null && body.length < 64000) {
+      const sent = navigator.sendBeacon(TELEMETRY_ENDPOINT, new Blob([body], { type: 'application/json' }))
+      if (sent) return
+    }
+    void fetch(TELEMETRY_ENDPOINT, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body,
+      keepalive: true
+    }).catch(() => undefined)
+  } catch {}
 }
 
 function normalizeWalletTransportError (err: unknown): Error {
@@ -362,8 +469,8 @@ function usercomMetadata ({ surface, tags = [], context = {} }: { surface: strin
     url: window.location.href,
     path: `${window.location.pathname}${window.location.search}`,
     referrer: document.referrer === '' ? undefined : document.referrer,
-    anonymousId: getStoredId(window.localStorage, 'papertrade_anonymous_id'),
-    sessionId: getStoredId(window.sessionStorage, 'papertrade_session_id'),
+    anonymousId: anonymousId(),
+    sessionId: sessionId(),
     tags: [`surface:${tagValue(surface)}`, ...tags].filter(Boolean),
     context: cleanContext(context)
   }
@@ -371,6 +478,15 @@ function usercomMetadata ({ surface, tags = [], context = {} }: { surface: strin
 
 function postSignal (name: string, metadata: Record<string, unknown>): void {
   try {
+    const tags = Array.isArray(metadata.tags) ? metadata.tags.map(String) : []
+    const severity = tags.includes('error') || tags.includes('wallet_failed') ? 'error' : tags.some(tag => tag.includes('failed')) ? 'warn' : 'info'
+    postTelemetry(name, severity, {
+      context: {
+        surface: metadata.surface,
+        tags,
+        ...(typeof metadata.context === 'object' && metadata.context != null ? metadata.context as Record<string, unknown> : {})
+      }
+    })
     void fetch(USERCOM_SIGNAL_ENDPOINT, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
@@ -489,6 +605,7 @@ function WalletHelp ({ message, freePageUrl }: { message: string, freePageUrl?: 
           {freePageUrl != null && <Link className='button secondary' to={freePageUrl}><BookOpen size={18} /> Read page 1 free</Link>}
           <button type='button' onClick={() => window.location.reload()}><RefreshCw size={18} /> Retry</button>
         </div>
+        <p className='hint'>Diagnostic ID: {sessionId()}</p>
       </section>
     </div>
   )
@@ -549,6 +666,7 @@ function FeedbackPanel ({ surface }: { surface: string }): JSX.Element {
         <label>Message <textarea value={form.feedback} onChange={e => setForm({ ...form, feedback: e.target.value })} /></label>
         <button className='button' type='submit'>Send feedback</button>
       </form>
+      <p className='hint'>Diagnostic ID: {sessionId()}</p>
       {message !== '' && <p className='notice compact'>{message}</p>}
     </section>
   )
@@ -575,6 +693,78 @@ function ShareButton ({ title, text, path }: { title: string, text: string, path
 function Analytics ({ status }: { status: Status | null }): null {
   const location = useLocation()
   useEffect(() => {
+    postTelemetry('app.boot', 'info', {
+      context: {
+        userAgent: navigator.userAgent,
+        standalone: window.matchMedia('(display-mode: standalone)').matches,
+        storageAvailable: (() => {
+          try {
+            window.sessionStorage.setItem('papertrade_storage_probe', '1')
+            window.sessionStorage.removeItem('papertrade_storage_probe')
+            return true
+          } catch {
+            return false
+          }
+        })()
+      }
+    })
+    const onError = (event: ErrorEvent): void => {
+      postTelemetry('app.error', 'error', {
+        context: {
+          message: event.message,
+          filename: event.filename,
+          line: event.lineno,
+          column: event.colno
+        }
+      })
+    }
+    const onUnhandled = (event: PromiseRejectionEvent): void => {
+      const reason = event.reason instanceof Error ? event.reason.message : String(event.reason ?? 'Unhandled promise rejection')
+      postTelemetry('app.unhandled_rejection', 'error', { context: { message: reason } })
+    }
+    const onOffline = (): void => postTelemetry('app.offline', 'warn')
+    const onOnline = (): void => postTelemetry('app.online', 'info')
+    const onVisibility = (): void => postTelemetry('app.visibility', 'info', { context: { visibilityState: document.visibilityState } })
+    const onPageHide = (): void => postTelemetry('app.pagehide', 'info', { context: { visibilityState: document.visibilityState } })
+    window.addEventListener('error', onError)
+    window.addEventListener('unhandledrejection', onUnhandled)
+    window.addEventListener('offline', onOffline)
+    window.addEventListener('online', onOnline)
+    document.addEventListener('visibilitychange', onVisibility)
+    window.addEventListener('pagehide', onPageHide)
+    let observer: PerformanceObserver | undefined
+    try {
+      observer = new PerformanceObserver(list => {
+        for (const entry of list.getEntries()) {
+          postTelemetry('app.long_task', 'warn', {
+            durationMs: entry.duration,
+            context: { entryType: entry.entryType, name: entry.name }
+          })
+        }
+      })
+      observer.observe({ entryTypes: ['longtask'] })
+    } catch {}
+    const heartbeat = window.setInterval(() => {
+      postTelemetry('app.heartbeat', 'info', {
+        context: {
+          visibilityState: document.visibilityState,
+          memory: (performance as Performance & { memory?: { usedJSHeapSize?: number, jsHeapSizeLimit?: number } }).memory
+        }
+      })
+    }, 60000)
+    return () => {
+      window.removeEventListener('error', onError)
+      window.removeEventListener('unhandledrejection', onUnhandled)
+      window.removeEventListener('offline', onOffline)
+      window.removeEventListener('online', onOnline)
+      document.removeEventListener('visibilitychange', onVisibility)
+      window.removeEventListener('pagehide', onPageHide)
+      observer?.disconnect()
+      window.clearInterval(heartbeat)
+    }
+  }, [])
+
+  useEffect(() => {
     postSignal('page.view', usercomMetadata({
       surface: 'app',
       tags: [`route:${tagValue(location.pathname)}`, status?.setupComplete === true ? 'setup:complete' : 'setup:pending', status?.mode != null ? `mode:${status.mode}` : 'mode:unknown'],
@@ -587,11 +777,25 @@ function Analytics ({ status }: { status: Status | null }): null {
 function useStatus (): [Status | null, () => Promise<void>] {
   const [status, setStatus] = useState<Status | null>(null)
   const refresh = async (): Promise<void> => {
-    const res = await fetch(`${API}/status`)
-    const json = await res.json()
-    setStatus(json)
+    const startedAt = performance.now()
+    try {
+      const res = await fetch(`${API}/status`)
+      const json = await res.json()
+      setStatus(json)
+      postTelemetry('api.status_loaded', res.ok ? 'info' : 'warn', {
+        durationMs: performance.now() - startedAt,
+        requestId: res.headers.get('x-papertrade-request-id'),
+        context: { status: res.status }
+      })
+    } catch (err) {
+      postTelemetry('api.status_failed', 'error', {
+        durationMs: performance.now() - startedAt,
+        context: { message: err instanceof Error ? err.message : String(err) }
+      })
+      throw err
+    }
   }
-  useEffect(() => { void refresh() }, [])
+  useEffect(() => { void refresh().catch(() => undefined) }, [])
   return [status, refresh]
 }
 
@@ -625,13 +829,26 @@ function Shell ({ children, status }: { children: React.ReactNode, status: Statu
 function Newsstand ({ status }: { status: Status | null }): JSX.Element {
   const appearance = appearanceFromStatus(status)
   const [publications, setPublications] = useState<Publication[]>([])
-  useEffect(() => {
-    setClientMeta(appearance.metaTitle, appearance.metaDescription)
-    void fetch(`${API}/publications`).then(async res => await res.json()).then(json => {
+  const [loadMessage, setLoadMessage] = useState('')
+  const loadPublications = async (): Promise<void> => {
+    const startedAt = performance.now()
+    try {
+      setLoadMessage('')
+      const res = await fetch(`${API}/publications`)
+      const json = await res.json()
+      if (!res.ok) throw new Error(json.message ?? 'Could not load publications')
       const rows = json.publications ?? []
       setPublications(rows)
-      postSignal('newsstand.loaded', usercomMetadata({ surface: 'newsstand', tags: ['reader'], context: { publicationCount: rows.length } }))
-    })
+      postSignal('newsstand.loaded', usercomMetadata({ surface: 'newsstand', tags: ['reader'], context: { publicationCount: rows.length, durationMs: Math.round(performance.now() - startedAt) } }))
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Could not load publications'
+      setLoadMessage(message)
+      postSignal('newsstand.failed', usercomMetadata({ surface: 'newsstand', tags: ['error'], context: { message, durationMs: Math.round(performance.now() - startedAt) } }))
+    }
+  }
+  useEffect(() => {
+    setClientMeta(appearance.metaTitle, appearance.metaDescription)
+    void loadPublications()
   }, [appearance.metaDescription, appearance.metaTitle])
   return (
     <section className='surface'>
@@ -659,7 +876,13 @@ function Newsstand ({ status }: { status: Status | null }): JSX.Element {
             </div>
           </article>
         ))}
-        {publications.length === 0 && <p className='empty'>No publications are live yet.</p>}
+        {loadMessage !== '' && (
+          <div className='empty'>
+            <p>{loadMessage}</p>
+            <button type='button' onClick={() => { void loadPublications() }}><RefreshCw size={18} /> Retry</button>
+          </div>
+        )}
+        {publications.length === 0 && loadMessage === '' && <p className='empty'>No publications are live yet.</p>}
       </div>
       <FeedbackPanel surface='newsstand' />
     </section>
@@ -1158,12 +1381,14 @@ function Author ({ status }: { status: Status | null }): JSX.Element {
 }
 
 function Admin ({ status, refreshStatus }: { status: Status | null, refreshStatus: () => Promise<void> }): JSX.Element {
-  const [activeTab, setActiveTab] = useState<'review' | 'appearance' | 'wallet' | 'admins' | 'payouts'>('review')
+  const [activeTab, setActiveTab] = useState<'review' | 'appearance' | 'wallet' | 'admins' | 'payouts' | 'telemetry'>('review')
   const [message, setMessage] = useState('')
   const [publications, setPublications] = useState<AdminPublication[]>([])
   const [authorBalances, setAuthorBalances] = useState<any[]>([])
   const [payouts, setPayouts] = useState<any[]>([])
   const [admins, setAdmins] = useState<AdminUser[]>([])
+  const [telemetry, setTelemetry] = useState<ClientEvent[]>([])
+  const [telemetrySummary, setTelemetrySummary] = useState<Array<{ event_name: string, severity: string, count: number }>>([])
   const [appearance, setAppearance] = useState<Appearance>(appearanceFromStatus(status))
   const [adminSettings, setAdminSettings] = useState<AdminSettings>({
     mode: status?.mode ?? 'private_publish',
@@ -1221,7 +1446,17 @@ function Admin ({ status, refreshStatus }: { status: Status | null, refreshStatu
     })
     setServerWallet({ serverPublicKey: walletJson.serverPublicKey, balanceSats: Number(walletJson.balanceSats ?? 0) })
   }
+  const loadTelemetry = async (): Promise<void> => {
+    const res = await withWalletTimeout(authFetch(`${API}/admin/telemetry`), 'load diagnostics')
+    const json = await res.json()
+    if (!res.ok) throw new Error(json.message ?? 'Could not load diagnostics')
+    setTelemetry(json.events ?? [])
+    setTelemetrySummary(json.summary ?? [])
+  }
   useEffect(() => { void refresh().catch(err => setMessage(friendlyErrorMessage(err, 'Could not load admin workspace'))) }, [])
+  useEffect(() => {
+    if (activeTab === 'telemetry') void loadTelemetry().catch(err => setMessage(friendlyErrorMessage(err, 'Could not load diagnostics')))
+  }, [activeTab])
   useEffect(() => {
     if (status == null) return
     setAppearance(appearanceFromStatus(status))
@@ -1340,6 +1575,7 @@ function Admin ({ status, refreshStatus }: { status: Status | null, refreshStatu
         <button className={activeTab === 'wallet' ? 'tab active' : 'tab'} type='button' onClick={() => setActiveTab('wallet')}><Library size={18} /> Wallet</button>
         <button className={activeTab === 'admins' ? 'tab active' : 'tab'} type='button' onClick={() => setActiveTab('admins')}><User size={18} /> Admins</button>
         <button className={activeTab === 'payouts' ? 'tab active' : 'tab'} type='button' onClick={() => setActiveTab('payouts')}><Check size={18} /> Payouts</button>
+        <button className={activeTab === 'telemetry' ? 'tab active' : 'tab'} type='button' onClick={() => setActiveTab('telemetry')}><Activity size={18} /> Diagnostics</button>
       </div>
       {activeTab === 'review' && (
         <section className='tool-panel'>
@@ -1502,6 +1738,49 @@ function Admin ({ status, refreshStatus }: { status: Status | null, refreshStatu
             </div>
           ))}
           {payouts.length === 0 && <p className='empty'>No payouts have been created yet.</p>}
+        </section>
+      )}
+      {activeTab === 'telemetry' && (
+        <section className='tool-panel publication-list'>
+          <div className='page-head'>
+            <div>
+              <h2>Diagnostics</h2>
+              <p className='hint'>Recent client events, wallet failures, mobile lifecycle changes, and slow or failed interactions captured by this PaperTrade server.</p>
+            </div>
+            <button className='button secondary' type='button' onClick={() => { void loadTelemetry().catch(err => setMessage(err.message)) }}><RefreshCw size={18} /> Refresh</button>
+          </div>
+          <div className='metric-grid'>
+            {telemetrySummary.slice(0, 6).map(item => (
+              <div className='metric-card' key={`${item.event_name}:${item.severity}`}>
+                <strong>{Number(item.count ?? 0)}</strong>
+                <span>{item.event_name}</span>
+                <small>{item.severity}</small>
+              </div>
+            ))}
+            {telemetrySummary.length === 0 && <p className='empty'>No client diagnostics recorded in the last 24 hours.</p>}
+          </div>
+          <div className='telemetry-list'>
+            {telemetry.map(event => {
+              const parsedContext = (() => {
+                try {
+                  return event.context != null ? JSON.parse(event.context) : {}
+                } catch {
+                  return {}
+                }
+              })()
+              return (
+                <div className={`telemetry-row telemetry-${event.severity}`} key={event.id}>
+                  <div>
+                    <strong>{event.event_name}</strong>
+                    <span>{event.severity} · {event.route ?? event.path ?? 'unknown route'} · {event.received_at ?? ''}</span>
+                    <small>session {event.session_id ?? 'unknown'}{event.request_id != null ? ` · request ${event.request_id}` : ''}</small>
+                  </div>
+                  <pre>{JSON.stringify(parsedContext, null, 2).slice(0, 1200)}</pre>
+                </div>
+              )
+            })}
+            {telemetry.length === 0 && <p className='empty'>No diagnostic events yet.</p>}
+          </div>
         </section>
       )}
       {message !== '' && !isWalletHelpMessage(message) && <p className='notice'>{message}</p>}

@@ -846,6 +846,75 @@ h1 {
   font-size: 24px;
 }
 
+.metric-grid {
+  display: grid;
+  gap: 12px;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  margin-bottom: 18px;
+}
+
+.metric-card {
+  background: color-mix(in srgb, var(--pt-surface) 92%, var(--pt-primary) 8%);
+  border: 1px solid var(--pt-border);
+  border-radius: 8px;
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+  padding: 12px;
+}
+
+.metric-card strong {
+  font-size: 26px;
+}
+
+.metric-card span,
+.metric-card small {
+  color: var(--pt-muted);
+  overflow-wrap: anywhere;
+}
+
+.telemetry-list {
+  display: grid;
+  gap: 10px;
+}
+
+.telemetry-row {
+  border: 1px solid var(--pt-border);
+  border-radius: 8px;
+  display: grid;
+  gap: 10px;
+  padding: 12px;
+}
+
+.telemetry-row > div {
+  display: grid;
+  gap: 4px;
+}
+
+.telemetry-row span,
+.telemetry-row small {
+  color: var(--pt-muted);
+}
+
+.telemetry-error,
+.telemetry-fatal {
+  border-color: #b9413a;
+}
+
+.telemetry-warn {
+  border-color: #d8b239;
+}
+
+.telemetry-row pre {
+  background: color-mix(in srgb, var(--pt-text) 8%, var(--pt-surface) 92%);
+  border-radius: 6px;
+  margin: 0;
+  max-height: 220px;
+  overflow: auto;
+  padding: 10px;
+  white-space: pre-wrap;
+}
+
 .admin-list {
   display: grid;
   gap: 8px;
