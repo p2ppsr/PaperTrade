@@ -765,6 +765,10 @@ h1 {
     grid-template-columns: 1fr;
   }
 
+  .admin-grid.compact {
+    grid-template-columns: 1fr;
+  }
+
   .wizard-grid {
     grid-template-columns: 1fr;
   }
