@@ -2,7 +2,7 @@ import React, { useEffect, useMemo, useState } from 'react'
 import { createRoot } from 'react-dom/client'
 import { BrowserRouter, Link, Route, Routes, useLocation, useNavigate, useParams } from 'react-router-dom'
 import { AuthFetch, WalletClient } from '@bsv/sdk'
-import { BookOpen, Check, ExternalLink, FileText, Home, Library, MessageCircle, Settings, Upload, User } from 'lucide-react'
+import { BookOpen, Check, ExternalLink, FileText, Home, Library, MessageCircle, Monitor, RefreshCw, Settings, Smartphone, Upload, User } from 'lucide-react'
 import './styles.css'
 
 type WalletSubstrate = 'auto' | 'json-api' | 'secure-json-api' | 'Cicada' | 'XDM' | 'window.CWI'
@@ -44,9 +44,20 @@ const WALLET_SUBSTRATE = ((import.meta as any).env?.VITE_WALLET_SUBSTRATE ?? 'js
 const USERCOM_SOURCE = 'papertrade'
 const USERCOM_SUBMIT_ENDPOINT = 'https://usercom.babbage.systems/submit'
 const USERCOM_SIGNAL_ENDPOINT = 'https://usercom.babbage.systems/signal'
-const GET_METANET_URL = 'https://getmetanet.com'
+const GET_METANET_DOWNLOADS_URL = 'https://getmetanet.com/downloads'
+const METANET_EXPLORER_IOS_URL = 'https://apps.apple.com/us/app/metanet-explorer/id6752445658'
+const METANET_EXPLORER_ANDROID_URL = 'https://play.google.com/store/apps/details?id=app.metanet.explorer'
+const BSV_BROWSER_ANDROID_URL = 'https://play.google.com/store/apps/details?id=org.bsvassociation.browser'
+const BSV_BROWSER_URL = 'https://desktop.bsvb.tech/'
 const WALLET_TIMEOUT_MS = 20000
 let walletRequestQueue: Promise<unknown> = Promise.resolve()
+
+interface WalletOption {
+  label: string
+  description: string
+  href: string
+  icon: 'phone' | 'desktop'
+}
 
 function getWallet (): WalletClient {
   return new WalletClient(WALLET_SUBSTRATE, WALLET_ORIGINATOR)
@@ -88,7 +99,11 @@ async function authFetch (url: string, init?: RequestInit): Promise<Response> {
   const request = async (): Promise<Response> => {
     const wallet = getWallet()
     const fetcher = new AuthFetch(wallet, undefined, undefined, WALLET_ORIGINATOR)
-    return await fetcher.fetch(absoluteRequestUrl(url), init as any)
+    try {
+      return await fetcher.fetch(absoluteRequestUrl(url), init as any)
+    } catch (err) {
+      throw normalizeWalletTransportError(err)
+    }
   }
   const next = walletRequestQueue.then(request, request)
   walletRequestQueue = next.then(() => undefined, () => undefined)
@@ -179,6 +194,18 @@ function cleanContext (context: Record<string, unknown>): Record<string, unknown
   return Object.fromEntries(Object.entries(context).filter(([, value]) => value !== undefined && value !== null && value !== ''))
 }
 
+function normalizeWalletTransportError (err: unknown): Error {
+  const raw = err instanceof Error ? err.message : typeof err === 'string' ? err : ''
+  const lower = raw.toLowerCase()
+  const isTransportFailure = lower === 'load failed' ||
+    lower.includes('failed to fetch') ||
+    lower.includes('networkerror') ||
+    lower.includes('communication substrate') ||
+    lower.includes('wallet')
+  if (!isTransportFailure) return err instanceof Error ? err : new Error(raw === '' ? 'Wallet request failed' : raw)
+  return new Error('BRC100 wallet setup is needed to continue. Open PaperTrade in Metanet Explorer, BSV Browser, or another compatible BRC100 wallet browser.')
+}
+
 function usercomMetadata ({ surface, tags = [], context = {} }: { surface: string, tags?: string[], context?: Record<string, unknown> }): Record<string, unknown> {
   return {
     source: USERCOM_SOURCE,
@@ -206,24 +233,92 @@ function postSignal (name: string, metadata: Record<string, unknown>): void {
 
 function friendlyErrorMessage (err: unknown, fallback: string): string {
   const raw = err instanceof Error ? err.message : typeof err === 'string' ? err : fallback
-  const lower = raw.toLowerCase()
-  if (lower.includes('wallet') || lower.includes('communication substrate') || lower.includes('auth') || lower.includes('identity')) {
+  if (isWalletHelpMessage(raw)) {
     return `${raw}. PaperTrade needs a BRC100 wallet for protected actions and paid pages.`
   }
   return raw === '' ? fallback : raw
 }
 
-function WalletHelp ({ message }: { message: string }): JSX.Element | null {
+function isWalletHelpMessage (message: string): boolean {
   const lower = message.toLowerCase()
-  if (!(lower.includes('wallet') || lower.includes('brc100') || lower.includes('payment') || lower.includes('auth'))) return null
+  return lower.includes('wallet') ||
+    lower.includes('brc100') ||
+    lower.includes('payment') ||
+    lower.includes('auth') ||
+    lower.includes('identity') ||
+    lower.includes('authenticate')
+}
+
+function platformWalletOptions (): WalletOption[] {
+  const ua = window.navigator.userAgent.toLowerCase()
+  const isIOS = /iphone|ipad|ipod/.test(ua)
+  const isAndroid = ua.includes('android')
+  const mobileOptions: WalletOption[] = [
+    {
+      label: 'Metanet Explorer for iOS',
+      description: 'Best choice on iPhone and iPad. Browse PaperTrade inside the app and approve page payments there.',
+      href: METANET_EXPLORER_IOS_URL,
+      icon: 'phone'
+    },
+    {
+      label: 'Metanet Explorer for Android',
+      description: 'Android wallet browser for Metanet apps, identity, and micropayments.',
+      href: METANET_EXPLORER_ANDROID_URL,
+      icon: 'phone'
+    },
+    {
+      label: 'BSV Browser',
+      description: 'Compatible BRC100 browser with built-in identity and micropayments.',
+      href: isAndroid ? BSV_BROWSER_ANDROID_URL : BSV_BROWSER_URL,
+      icon: isAndroid ? 'phone' : 'desktop'
+    }
+  ]
+  const desktopOptions: WalletOption[] = [
+    {
+      label: 'Get Metanet',
+      description: 'Download the Metanet wallet/client for this device, then open PaperTrade again.',
+      href: GET_METANET_DOWNLOADS_URL,
+      icon: 'desktop'
+    },
+    {
+      label: 'BSV Browser',
+      description: 'Use a BRC100-compatible browser for wallet login, identity, and page payments.',
+      href: BSV_BROWSER_URL,
+      icon: 'desktop'
+    }
+  ]
+  if (isIOS) return [mobileOptions[0], mobileOptions[2], desktopOptions[0]]
+  if (isAndroid) return [mobileOptions[2], mobileOptions[1], desktopOptions[0]]
+  return desktopOptions
+}
+
+function WalletHelp ({ message, freePageUrl }: { message: string, freePageUrl?: string }): JSX.Element | null {
+  if (!isWalletHelpMessage(message)) return null
+  const options = platformWalletOptions()
   return (
-    <div className='wallet-help'>
-      <div>
-        <strong>BRC100 wallet required</strong>
-        <p>Install or open a Metanet-compatible wallet, then retry this action.</p>
+    <section className='wallet-help'>
+      <div className='wallet-help-copy'>
+        <span className='step-label'>Wallet needed</span>
+        <h2>Continue with a BRC100 wallet</h2>
+        <p>You have reached a wallet-protected step. Install a compatible wallet browser, open PaperTrade there, and return to this page to continue.</p>
       </div>
-      <a className='button secondary' href={GET_METANET_URL} target='_blank' rel='noreferrer'><ExternalLink size={18} /> Get Metanet</a>
-    </div>
+      <div className='wallet-options'>
+        {options.map(option => (
+          <a className='wallet-option' href={option.href} target='_blank' rel='noreferrer' key={option.label}>
+            {option.icon === 'phone' ? <Smartphone size={20} /> : <Monitor size={20} />}
+            <span>
+              <strong>{option.label}</strong>
+              <small>{option.description}</small>
+            </span>
+            <ExternalLink size={16} />
+          </a>
+        ))}
+      </div>
+      <div className='wallet-actions'>
+        {freePageUrl != null && <Link className='button secondary' to={freePageUrl}><BookOpen size={18} /> Read page 1 free</Link>}
+        <button type='button' onClick={() => window.location.reload()}><RefreshCw size={18} /> Retry</button>
+      </div>
+    </section>
   )
 }
 
@@ -329,7 +424,6 @@ function Newsstand (): JSX.Element {
           <h1>Newsstand</h1>
           <p>Read page 1 free. Pay per page after that with a BRC100 wallet.</p>
         </div>
-        <a className='button secondary' href={GET_METANET_URL} target='_blank' rel='noreferrer'><ExternalLink size={18} /> Get Metanet</a>
       </header>
       <div className='publication-grid'>
         {publications.map(pub => (
@@ -423,8 +517,8 @@ function Reader ({ status }: { status: Status | null }): JSX.Element {
         <span>Page {currentPage}</span>
         <button type='button' onClick={() => navigate(`/read/${id}/${currentPage + 1}`)}>Next</button>
       </div>
-      {message !== '' && <p className='empty'>{message}</p>}
-      <WalletHelp message={message} />
+      {message !== '' && !isWalletHelpMessage(message) && <p className='empty'>{message}</p>}
+      <WalletHelp message={message} freePageUrl={currentPage > 1 ? `/read/${id}/1` : undefined} />
       {imageUrl != null && <img className='page-image' src={imageUrl} alt={`Page ${currentPage}`} />}
     </section>
   )
@@ -466,7 +560,7 @@ function AuthorPreview (): JSX.Element {
         <span>Preview page {currentPage}</span>
         <button type='button' onClick={() => navigate(`/author/read/${id}/${currentPage + 1}`)}>Next</button>
       </div>
-      {message !== '' && <p className='empty'>{message}</p>}
+      {message !== '' && !isWalletHelpMessage(message) && <p className='empty'>{message}</p>}
       <WalletHelp message={message} />
       {imageUrl != null && <img className='page-image' src={imageUrl} alt={`Preview page ${currentPage}`} />}
     </section>
@@ -549,7 +643,7 @@ function Setup ({ status, refresh }: { status: Status | null, refresh: () => Pro
         </section>
       </div>
       <button className='button primary-action' type='button' onClick={() => { void submit().catch(err => setMessage(err.message)) }}><Check size={18} /> Save setup</button>
-      {message !== '' && <p className='notice'>{message}</p>}
+      {message !== '' && !isWalletHelpMessage(message) && <p className='notice'>{message}</p>}
       <WalletHelp message={message} />
     </section>
   )
@@ -714,7 +808,7 @@ function Author ({ status }: { status: Status | null }): JSX.Element {
           </form>
         </section>
       </div>
-      {message !== '' && <p className='notice'>{message}</p>}
+      {message !== '' && !isWalletHelpMessage(message) && <p className='notice'>{message}</p>}
       <WalletHelp message={message} />
       <section className='tool-panel publication-list'>
         <h2>Your publications</h2>
@@ -860,7 +954,7 @@ function Admin (): JSX.Element {
         ))}
         {payouts.length === 0 && <p className='empty'>No payouts have been created yet.</p>}
       </section>
-      {message !== '' && <p className='notice'>{message}</p>}
+      {message !== '' && !isWalletHelpMessage(message) && <p className='notice'>{message}</p>}
       <WalletHelp message={message} />
     </section>
   )

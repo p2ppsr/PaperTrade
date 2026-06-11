@@ -392,17 +392,62 @@ h1 {
 }
 
 .wallet-help {
-  align-items: center;
-  display: flex;
+  display: grid;
   gap: 18px;
-  justify-content: space-between;
   max-width: 760px;
   width: 100%;
 }
 
-.wallet-help p {
+.wallet-help-copy h2 {
+  font-size: 26px;
+  line-height: 1.1;
+  margin-bottom: 8px;
+}
+
+.wallet-help p,
+.wallet-option small {
   color: #5c6570;
-  margin: 4px 0 0;
+  line-height: 1.45;
+  margin: 0;
+}
+
+.wallet-options {
+  display: grid;
+  gap: 10px;
+}
+
+.wallet-option {
+  align-items: center;
+  background: #f8fafb;
+  border: 1px solid #d6dde2;
+  border-radius: 8px;
+  display: grid;
+  gap: 12px;
+  grid-template-columns: 24px 1fr 18px;
+  min-width: 0;
+  padding: 12px;
+}
+
+.wallet-option:hover {
+  background: #edf4f2;
+  border-color: #b8cac4;
+}
+
+.wallet-option span {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+
+.wallet-option strong,
+.wallet-option small {
+  overflow-wrap: anywhere;
+}
+
+.wallet-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
 }
 
 .publication-editor {
