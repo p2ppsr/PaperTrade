@@ -1467,11 +1467,11 @@ async function createApp (): Promise<express.Express> {
   }
 
   app.get('/manifest.json', (_req, res) => {
-    res.type('application/manifest+json').json(appManifest())
+    res.type('application/manifest+json').json(appManifest(walletBootstrap.publicKey))
   })
 
   app.get(['/wallet-manifest.json', '/.well-known/wallet-manifest.json'], (_req, res) => {
-    res.json(walletManifest(walletBootstrap.publicKey))
+    res.type('application/manifest+json').json(walletManifest(walletBootstrap.publicKey))
   })
 
   app.get(`${ROUTING_PREFIX}/wallet/manifest`, (_req, res) => {

@@ -1324,9 +1324,9 @@ function About ({ status }: { status: Status | null }): JSX.Element {
       <section className='tool-panel publication-list'>
         <h2>Server contract</h2>
         <div className='contract-grid'>
-          <a href='/manifest.json' target='_blank' rel='noreferrer'>PWA manifest</a>
-          <a href='/wallet-manifest.json' target='_blank' rel='noreferrer'>Wallet manifest</a>
-          <a href='/.well-known/wallet-manifest.json' target='_blank' rel='noreferrer'>Well-known wallet manifest</a>
+          <a href='/manifest.json' target='_blank' rel='noreferrer'>Wallet and PWA manifest</a>
+          <a href='/wallet-manifest.json' target='_blank' rel='noreferrer'>Compatibility alias</a>
+          <a href='/.well-known/wallet-manifest.json' target='_blank' rel='noreferrer'>Well-known alias</a>
           <a href='/sitemap.xml' target='_blank' rel='noreferrer'>Sitemap</a>
         </div>
         <p className='hint'>This server is {status?.setupComplete === true ? 'configured' : 'awaiting setup'} and currently runs in {status?.mode === 'public_submissions' ? 'public submission' : 'private publishing'} mode.</p>

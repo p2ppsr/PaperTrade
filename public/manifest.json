@@ -20,22 +20,63 @@
     { "name": "About PaperTrade", "short_name": "About", "url": "/about", "icons": [{ "src": "/icon.svg", "sizes": "any", "type": "image/svg+xml" }] }
   ],
   "metanet": {
+    "schemaVersion": 1,
+    "brcs": ["BRC-100", "BRC-29", "BRC-73", "BRC-116"],
+    "repositoryUrl": "https://github.com/p2ppsr/PaperTrade",
+    "supportUrl": "https://usercom.babbage.systems/",
     "groupPermissions": {
+      "description": "Read, publish, and receive PaperTrade payouts.",
       "protocolPermissions": [
-        { "protocolID": [1, "identity key retrieval"], "description": "Identify the reader, author, or admin without passwords." },
-        { "protocolID": [2, "auth message signature"], "counterparty": "self", "description": "Sign authenticated API requests to the PaperTrade server." },
-        { "protocolID": [2, "3241645161d8"], "counterparty": "self", "description": "Receive PaperTrade author payouts using BRC29 payment remittance." },
-        { "protocolID": [1, "action label papertrade"], "description": "Label PaperTrade page payments, funding payments, and author payouts." },
-        { "protocolID": [1, "identity resolution"], "description": "Resolve author identity keys into user-friendly identity cards." }
+        { "protocolID": [2, "auth message signature"], "counterparty": "self", "description": "Sign in to PaperTrade." },
+        { "protocolID": [2, "3241645161d8"], "counterparty": "self", "description": "Receive author payouts." },
+        { "protocolID": [1, "action label papertrade"], "description": "Label PaperTrade wallet actions." },
+        { "protocolID": [1, "identity resolution"], "description": "Show readable identity cards." }
       ],
       "spendingAuthorization": {
         "amount": 100000,
-        "description": "Authorize small per-page reading payments and optional server funding payments."
+        "duration": 2592000,
+        "description": "Pay for pages and funding."
       },
       "basketAccess": [
-        { "basket": "papertrade-payouts", "description": "Track incoming PaperTrade author payout transactions." }
+        { "basket": "papertrade-payouts", "description": "Track received payouts." }
       ],
-      "certificateFieldAccess": []
+      "certificateAccess": []
+    },
+    "counterpartyPermissions": {
+      "description": "Trust the PaperTrade server for direct payout flows.",
+      "protocols": [
+        { "protocolName": "auth message signature", "description": "Authenticate server requests." },
+        { "protocolName": "3241645161d8", "description": "Receive BRC29 payouts." },
+        { "protocolName": "wallet payment", "description": "Internalize payout outputs." }
+      ]
+    }
+  },
+  "babbage": {
+    "groupPermissions": {
+      "description": "Read, publish, and receive PaperTrade payouts.",
+      "protocolPermissions": [
+        { "protocolID": [2, "auth message signature"], "counterparty": "self", "description": "Sign in to PaperTrade." },
+        { "protocolID": [2, "3241645161d8"], "counterparty": "self", "description": "Receive author payouts." },
+        { "protocolID": [1, "action label papertrade"], "description": "Label PaperTrade wallet actions." },
+        { "protocolID": [1, "identity resolution"], "description": "Show readable identity cards." }
+      ],
+      "spendingAuthorization": {
+        "amount": 100000,
+        "duration": 2592000,
+        "description": "Pay for pages and funding."
+      },
+      "basketAccess": [
+        { "basket": "papertrade-payouts", "description": "Track received payouts." }
+      ],
+      "certificateAccess": []
+    },
+    "counterpartyPermissions": {
+      "description": "Trust the PaperTrade server for direct payout flows.",
+      "protocols": [
+        { "protocolName": "auth message signature", "description": "Authenticate server requests." },
+        { "protocolName": "3241645161d8", "description": "Receive BRC29 payouts." },
+        { "protocolName": "wallet payment", "description": "Internalize payout outputs." }
+      ]
     }
   }
 }

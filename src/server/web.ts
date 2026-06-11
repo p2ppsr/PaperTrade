@@ -54,7 +54,8 @@ function safeJsonScript (value: Record<string, unknown>): string {
   return JSON.stringify(value).replace(/</g, '\\u003c')
 }
 
-export function appManifest (): Record<string, unknown> {
+export function appManifest (serverPublicKey?: string): Record<string, unknown> {
+  const metanet = metanetManifest(serverPublicKey)
   return {
     name: 'PaperTrade',
     short_name: 'PaperTrade',
@@ -106,121 +107,92 @@ export function appManifest (): Record<string, unknown> {
         url: 'url'
       }
     },
-    metanet: groupPermissionManifest(),
-    babbage: groupPermissionManifest()
+    metanet,
+    babbage: legacyBabbageManifest(metanet)
   }
 }
 
-function groupPermissionManifest (): Record<string, unknown> {
+function metanetManifest (serverPublicKey?: string): Record<string, unknown> {
   return {
+    schemaVersion: 1,
+    brcs: ['BRC-100', 'BRC-29', 'BRC-73', 'BRC-116'],
+    repositoryUrl: 'https://github.com/p2ppsr/PaperTrade',
+    supportUrl: 'https://usercom.babbage.systems/',
+    serverIdentityKey: serverPublicKey,
+    trustModel: 'The user keeps wallet custody. PaperTrade stores publication files and accounting state, while wallets approve authentication, page payments, funding payments, and payout receipt.',
     groupPermissions: {
+      description: 'Read, publish, and receive PaperTrade payouts.',
       protocolPermissions: [
-        {
-          protocolID: [1, 'identity key retrieval'],
-          description: 'Identify the reader, author, or admin without passwords.'
-        },
         {
           protocolID: [2, 'auth message signature'],
           counterparty: 'self',
-          description: 'Sign authenticated API requests to the PaperTrade server.'
+          description: 'Sign in to PaperTrade.'
         },
         {
           protocolID: [2, '3241645161d8'],
           counterparty: 'self',
-          description: 'Receive PaperTrade author payouts using BRC29 payment remittance.'
+          description: 'Receive author payouts.'
         },
         {
           protocolID: [1, 'action label papertrade'],
-          description: 'Label PaperTrade page payments, funding payments, and author payouts.'
+          description: 'Label PaperTrade wallet actions.'
         },
         {
           protocolID: [1, 'identity resolution'],
-          description: 'Resolve author identity keys into user-friendly identity cards.'
+          description: 'Show readable identity cards.'
         }
       ],
       spendingAuthorization: {
         amount: 100000,
-        description: 'Authorize small per-page reading payments and optional server funding payments.'
+        duration: 2592000,
+        description: 'Pay for pages and funding.'
       },
       basketAccess: [
         {
           basket: 'papertrade-payouts',
-          description: 'Track incoming PaperTrade author payout transactions.'
+          description: 'Track received payouts.'
         }
       ],
-      certificateFieldAccess: []
+      certificateAccess: []
     },
     counterpartyPermissions: {
+      description: 'Trust the PaperTrade server for direct payout flows.',
       protocols: [
         {
           protocolName: 'auth message signature',
-          description: 'Authenticate requests with the PaperTrade server.'
+          description: 'Authenticate server requests.'
         },
         {
           protocolName: '3241645161d8',
-          description: 'Use BRC29 key derivation for direct author payouts.'
+          description: 'Receive BRC29 payouts.'
         },
         {
           protocolName: 'wallet payment',
-          description: 'Internalize author payout outputs created by the PaperTrade server.'
+          description: 'Internalize payout outputs.'
         }
       ]
+    },
+    counterpartyTrust: {
+      server: serverPublicKey,
+      description: 'PaperTrade server wallet receives reader payments, creates payout transactions, and signs authenticated server responses.'
     }
   }
 }
 
 export function walletManifest (serverPublicKey: string): Record<string, unknown> {
   return {
-    name: 'PaperTrade',
-    short_name: 'PaperTrade',
-    version: '0.1.0',
+    ...appManifest(serverPublicKey),
     originator: new URL(hostingOrigin()).hostname,
     homepage_url: hostingOrigin(),
     app_url: hostingOrigin(),
-    support_url: 'https://usercom.babbage.systems/',
-    repository_url: 'https://github.com/p2ppsr/PaperTrade',
-    icon_url: absoluteUrl('/icon.svg'),
-    server_identity_key: serverPublicKey,
-    brcs: ['BRC-100', 'BRC-29', 'BRC-73', 'BRC-116'],
-    pact: {
-      version: 'BRC-116',
-      counterpartyTrust: [
-        {
-          counterparty: serverPublicKey,
-          role: 'PaperTrade server wallet',
-          reason: 'Receives reader page payments, creates author payout transactions, and signs authenticated server responses.'
-        }
-      ],
-      trustModel: 'The user keeps wallet custody. PaperTrade stores publication files and accounting state, while wallets approve authentication, page payments, funding payments, and payout receipt.'
-    },
-    permissions: groupPermissionManifest(),
-    annotatedPermissions: [
-      {
-        flow: 'Reader authentication',
-        methods: ['AuthFetch', 'BRC100 identity key'],
-        reason: 'Paid pages and existing entitlements are tied to a reader identity key.'
-      },
-      {
-        flow: 'Per-page payments',
-        methods: ['createAction via payment-express-middleware'],
-        reason: 'Pages after page 1 require small BSV payments unless an unexpired entitlement exists.'
-      },
-      {
-        flow: 'Author payout receipt',
-        methods: ['internalizeAction', 'BRC29 protocol 3241645161d8'],
-        reason: 'Author balances can be paid directly into the author wallet and acknowledged by the client.'
-      },
-      {
-        flow: 'Admin funding',
-        methods: ['createAction via payment-express-middleware'],
-        reason: 'Admins may pre-fund the server wallet so author payouts have spendable BSV.'
-      }
-    ],
-    dataUse: {
-      stores: ['author profiles', 'publication metadata', 'rendered page entitlement records', 'payment ledger entries', 'payout audit events'],
-      doesNotStore: ['user wallet seed phrases', 'wallet private keys', 'reader passwords'],
-      retention: 'Reader page entitlements last 30 days. Ledger and audit records remain available to the server operator.'
-    }
+    icon_url: absoluteUrl('/icon.svg')
+  }
+}
+
+function legacyBabbageManifest (metanet: Record<string, unknown>): Record<string, unknown> {
+  return {
+    groupPermissions: metanet.groupPermissions,
+    counterpartyPermissions: metanet.counterpartyPermissions
   }
 }
 
