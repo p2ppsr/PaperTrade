@@ -5,6 +5,8 @@ import { AuthFetch, WalletClient } from '@bsv/sdk'
 import { BookOpen, Check, ExternalLink, FileText, Home, Library, MessageCircle, Settings, Upload, User } from 'lucide-react'
 import './styles.css'
 
+type WalletSubstrate = 'auto' | 'json-api' | 'secure-json-api' | 'Cicada' | 'XDM' | 'window.CWI'
+
 interface Status {
   setupComplete: boolean
   identityKey?: string
@@ -37,6 +39,7 @@ interface AuthorProfile {
 
 const API = '/api'
 const WALLET_ORIGINATOR = (import.meta as any).env?.VITE_WALLET_ORIGINATOR ?? window.location.hostname
+const WALLET_SUBSTRATE = ((import.meta as any).env?.VITE_WALLET_SUBSTRATE ?? 'json-api') as WalletSubstrate
 const USERCOM_SOURCE = 'papertrade'
 const USERCOM_SUBMIT_ENDPOINT = 'https://usercom.babbage.systems/submit'
 const USERCOM_SIGNAL_ENDPOINT = 'https://usercom.babbage.systems/signal'
@@ -44,7 +47,7 @@ const GET_METANET_URL = 'https://getmetanet.com'
 const WALLET_TIMEOUT_MS = 20000
 
 function getWallet (): WalletClient {
-  return new WalletClient('auto', WALLET_ORIGINATOR)
+  return new WalletClient(WALLET_SUBSTRATE, WALLET_ORIGINATOR)
 }
 
 function absoluteRequestUrl (url: string): string {
