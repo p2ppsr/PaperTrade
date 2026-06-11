@@ -25,6 +25,7 @@ const upload = multer({ dest: path.join(DATA_DIR, 'tmp'), limits: { fileSize: 25
 const JSON_BODY_LIMIT = process.env.JSON_BODY_LIMIT ?? '80mb'
 const MAX_JSON_UPLOAD_BYTES = 40 * 1024 * 1024
 const MAX_AVATAR_BYTES = 5 * 1024 * 1024
+const MAX_APPEARANCE_ASSET_BYTES = 3 * 1024 * 1024
 const BRC29_PROTOCOL_ID = [2, '3241645161d8'] as const
 const AUTHOR_PAYOUT_PENDING_STATUSES = ['creating', 'pending_internalize']
 const WALLET_BALANCE_BASKET = '893b7646de0e1c9f741bd6e9169b76a8847ae34adef7bef1e6a285371206d2e8'
@@ -38,6 +39,26 @@ interface JsonUploadBody {
   fileName?: unknown
   mimeType?: unknown
   dataBase64?: unknown
+}
+
+interface AppearanceInput {
+  serverName?: unknown
+  newsstandLabel?: unknown
+  tagline?: unknown
+  metaTitle?: unknown
+  metaDescription?: unknown
+  theme?: {
+    primary?: unknown
+    accent?: unknown
+    background?: unknown
+    surface?: unknown
+    text?: unknown
+    muted?: unknown
+    border?: unknown
+  }
+  logoUrl?: unknown
+  iconUrl?: unknown
+  ogImageUrl?: unknown
 }
 
 interface AuthorPayoutPayload {
@@ -89,6 +110,76 @@ async function ensureAuthor (identityKey: string, displayName?: string): Promise
 
 function displayUnitFromBody (value: unknown, fallback = 'sats'): 'sats' | 'usd_cents' {
   return value === 'usd_cents' ? 'usd_cents' : fallback === 'usd_cents' ? 'usd_cents' : 'sats'
+}
+
+function boundedText (value: unknown, fallback: string, maxLength: number): string {
+  const text = typeof value === 'string' ? value.replace(/\s+/g, ' ').trim() : ''
+  if (text === '') return fallback
+  return text.slice(0, maxLength)
+}
+
+function optionalBoundedText (value: unknown, maxLength: number): string | null {
+  const text = typeof value === 'string' ? value.replace(/\s+/g, ' ').trim() : ''
+  return text === '' ? null : text.slice(0, maxLength)
+}
+
+function colorFromBody (value: unknown, fallback: string): string {
+  const text = typeof value === 'string' ? value.trim() : ''
+  return /^#[0-9a-fA-F]{6}$/.test(text) ? text.toLowerCase() : fallback
+}
+
+function urlPathFromBody (value: unknown, fallback: string | null): string | null {
+  const text = typeof value === 'string' ? value.trim() : ''
+  if (text === '') return fallback
+  if (text.startsWith('/api/appearance/assets/')) return text.slice(0, 512)
+  try {
+    const parsed = new URL(text)
+    if (parsed.protocol === 'https:') return parsed.toString().slice(0, 512)
+  } catch {}
+  return fallback
+}
+
+function appearanceFromSettings (settings: any): Record<string, unknown> {
+  return {
+    serverName: settings.server_name ?? 'PaperTrade',
+    newsstandLabel: settings.newsstand_label ?? 'Newsstand',
+    tagline: settings.tagline ?? 'Read page 1 free. Pay per page after that with a BRC100 wallet.',
+    metaTitle: settings.meta_title ?? 'PaperTrade | BSV per-page publishing newsstand',
+    metaDescription: settings.meta_description ?? 'PaperTrade is a BSV newsstand where readers preview page 1 free and pay per page for independent writing with a BRC100 wallet.',
+    theme: {
+      primary: settings.theme_primary ?? '#1f4f46',
+      accent: settings.theme_accent ?? '#b2772c',
+      background: settings.theme_background ?? '#f7f5ef',
+      surface: settings.theme_surface ?? '#ffffff',
+      text: settings.theme_text ?? '#20231f',
+      muted: settings.theme_muted ?? '#5c6570',
+      border: settings.theme_border ?? '#ddd8ca'
+    },
+    logoUrl: settings.logo_url ?? null,
+    iconUrl: settings.icon_url ?? null,
+    ogImageUrl: settings.og_image_url ?? null
+  }
+}
+
+function appearanceUpdateFromBody (input: AppearanceInput, current: any): Record<string, unknown> {
+  const theme = input.theme ?? {}
+  return {
+    server_name: boundedText(input.serverName, current.server_name ?? 'PaperTrade', 120),
+    newsstand_label: boundedText(input.newsstandLabel, current.newsstand_label ?? 'Newsstand', 80),
+    tagline: boundedText(input.tagline, current.tagline ?? 'Read page 1 free. Pay per page after that with a BRC100 wallet.', 260),
+    meta_title: boundedText(input.metaTitle, current.meta_title ?? 'PaperTrade | BSV per-page publishing newsstand', 160),
+    meta_description: optionalBoundedText(input.metaDescription, 260) ?? current.meta_description ?? 'PaperTrade is a BSV newsstand where readers preview page 1 free and pay per page for independent writing with a BRC100 wallet.',
+    theme_primary: colorFromBody(theme.primary, current.theme_primary ?? '#1f4f46'),
+    theme_accent: colorFromBody(theme.accent, current.theme_accent ?? '#b2772c'),
+    theme_background: colorFromBody(theme.background, current.theme_background ?? '#f7f5ef'),
+    theme_surface: colorFromBody(theme.surface, current.theme_surface ?? '#ffffff'),
+    theme_text: colorFromBody(theme.text, current.theme_text ?? '#20231f'),
+    theme_muted: colorFromBody(theme.muted, current.theme_muted ?? '#5c6570'),
+    theme_border: colorFromBody(theme.border, current.theme_border ?? '#ddd8ca'),
+    logo_url: urlPathFromBody(input.logoUrl, current.logo_url ?? null),
+    icon_url: urlPathFromBody(input.iconUrl, current.icon_url ?? null),
+    og_image_url: urlPathFromBody(input.ogImageUrl, current.og_image_url ?? null)
+  }
 }
 
 function defaultAuthorProfile (identityKey: string): Record<string, unknown> {
@@ -764,6 +855,7 @@ async function createApp (): Promise<express.Express> {
       walletStorageUrl: settings.wallet_storage_url,
       serverPublicKey: settings.server_public_key,
       serverKeyStatus: settings.server_key_status,
+      appearance: appearanceFromSettings(settings),
       identityKey,
       isAdmin: await isAdmin(identityKey)
     })
@@ -795,13 +887,15 @@ async function createApp (): Promise<express.Express> {
       if (alreadySetup && !(await isAdmin(actor))) {
         throw new Error('Only admins can update setup after first run')
       }
+      const appearance = req.body.appearance == null ? {} : appearanceUpdateFromBody(req.body.appearance as AppearanceInput, settings)
       await trx('server_settings').where({ id: 1 }).update({
         setup_complete: true,
         mode,
         price_per_page_sats: pricePerPageSats,
         commission_bps: commissionBps,
         display_unit: displayUnit,
-        wallet_storage_url: walletStorageUrl
+        wallet_storage_url: walletStorageUrl,
+        ...appearance
       })
       await trx('admins').insert({ identity_key: actor, added_by: actor }).onConflict('identity_key').ignore()
       await trx('authors').insert({
@@ -813,7 +907,8 @@ async function createApp (): Promise<express.Express> {
         pricePerPageSats,
         commissionBps,
         displayUnit,
-        walletStorageUrl
+        walletStorageUrl,
+        appearance
       }, trx)
     })
 
@@ -1335,16 +1430,18 @@ async function createApp (): Promise<express.Express> {
   api.get('/admin/settings', requireAdmin, async (_req, res) => {
     const settings = await getSettings()
     const admins = await db('admins').orderBy('created_at', 'asc')
-    res.json({ status: 'success', settings, admins })
+    res.json({ status: 'success', settings, appearance: appearanceFromSettings(settings), admins })
   })
 
   api.put('/admin/settings', requireAdmin, async (req, res) => {
+    const current = await getSettings()
     const settings = {
       mode: req.body.mode === 'public_submissions' ? 'public_submissions' : 'private_publish',
       price_per_page_sats: asPositiveInteger(req.body.pricePerPageSats, 25),
       commission_bps: asPositiveInteger(req.body.commissionBps, 1000),
       display_unit: displayUnitFromBody(req.body.displayUnit),
-      wallet_storage_url: String(req.body.walletStorageUrl ?? 'https://storage.babbage.systems')
+      wallet_storage_url: String(req.body.walletStorageUrl ?? 'https://storage.babbage.systems'),
+      ...(req.body.appearance == null ? {} : appearanceUpdateFromBody(req.body.appearance as AppearanceInput, current))
     }
     if (settings.commission_bps > 10000) {
       res.status(400).json({ status: 'error', message: 'Commission cannot exceed 100%' })
@@ -1353,6 +1450,44 @@ async function createApp (): Promise<express.Express> {
     await db('server_settings').where({ id: 1 }).update(settings)
     await writeAudit('settings_updated', identityKeyOf(req), 'server_settings', '1', settings)
     res.json({ status: 'success' })
+  })
+
+  api.post('/admin/appearance/assets', requireAdmin, async (req, res) => {
+    const uploaded = decodeJsonUpload(req.body as JsonUploadBody, MAX_APPEARANCE_ASSET_BYTES)
+    if (!['image/png', 'image/jpeg', 'image/webp', 'image/gif'].includes(uploaded.mimeType)) {
+      res.status(400).json({ status: 'error', message: 'Appearance images must be PNG, JPEG, WebP, or GIF' })
+      return
+    }
+    const kind = ['logo', 'icon', 'og_image'].includes(String(req.body.kind)) ? String(req.body.kind) : 'logo'
+    const extByMime: Record<string, string> = {
+      'image/png': '.png',
+      'image/jpeg': '.jpg',
+      'image/webp': '.webp',
+      'image/gif': '.gif'
+    }
+    const appearanceDir = path.join(DATA_DIR, 'appearance')
+    await fs.mkdir(appearanceDir, { recursive: true })
+    const assetName = `${kind}-${randomUUID()}${extByMime[uploaded.mimeType]}`
+    await fs.writeFile(path.join(appearanceDir, assetName), uploaded.bytes)
+    const url = `${ROUTING_PREFIX}/appearance/assets/${assetName}`
+    await writeAudit('appearance_asset_uploaded', identityKeyOf(req), 'server_settings', '1', { kind, url })
+    res.json({ status: 'success', url })
+  })
+
+  api.get('/appearance/assets/:fileName', async (req, res) => {
+    const fileName = path.basename(req.params.fileName)
+    if (fileName !== req.params.fileName || !/^[a-z0-9_-]+-[0-9a-f-]+\.(png|jpg|webp|gif)$/i.test(fileName)) {
+      res.status(404).json({ status: 'error', message: 'Asset not found' })
+      return
+    }
+    const filePath = path.join(DATA_DIR, 'appearance', fileName)
+    try {
+      await fs.access(filePath)
+      res.setHeader('Cache-Control', 'public, max-age=3600')
+      res.sendFile(filePath)
+    } catch {
+      res.status(404).json({ status: 'error', message: 'Asset not found' })
+    }
   })
 
   api.get('/admin/admins', requireAdmin, async (_req, res) => {
@@ -1466,16 +1601,28 @@ async function createApp (): Promise<express.Express> {
     return cachedIndexHtml
   }
 
-  app.get('/manifest.json', (_req, res) => {
-    res.type('application/manifest+json').json(appManifest(walletBootstrap.publicKey))
+  app.get('/manifest.json', async (_req, res, next) => {
+    try {
+      res.type('application/manifest+json').json(appManifest(walletBootstrap.publicKey, appearanceFromSettings(await getSettings())))
+    } catch (err) {
+      next(err)
+    }
   })
 
-  app.get(['/wallet-manifest.json', '/.well-known/wallet-manifest.json'], (_req, res) => {
-    res.type('application/manifest+json').json(walletManifest(walletBootstrap.publicKey))
+  app.get(['/wallet-manifest.json', '/.well-known/wallet-manifest.json'], async (_req, res, next) => {
+    try {
+      res.type('application/manifest+json').json(walletManifest(walletBootstrap.publicKey, appearanceFromSettings(await getSettings())))
+    } catch (err) {
+      next(err)
+    }
   })
 
-  app.get(`${ROUTING_PREFIX}/wallet/manifest`, (_req, res) => {
-    res.json(walletManifest(walletBootstrap.publicKey))
+  app.get(`${ROUTING_PREFIX}/wallet/manifest`, async (_req, res, next) => {
+    try {
+      res.json(walletManifest(walletBootstrap.publicKey, appearanceFromSettings(await getSettings())))
+    } catch (err) {
+      next(err)
+    }
   })
 
   app.get('/robots.txt', (_req, res) => {
@@ -1499,7 +1646,7 @@ async function createApp (): Promise<express.Express> {
       }
       const publicationId = req.path.match(/^\/publication\/([^/]+)$/)?.[1]
       const publication = publicationId == null ? null : await getPublishedPublicationMeta(publicationId)
-      res.type('html').send(renderHtmlShell(await indexHtml(), metaForPath(req.path, publication)))
+      res.type('html').send(renderHtmlShell(await indexHtml(), metaForPath(req.path, publication, appearanceFromSettings(await getSettings()))))
     } catch (err) {
       next(err)
     }

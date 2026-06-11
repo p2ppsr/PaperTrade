@@ -27,6 +27,21 @@ export interface ServerSettings {
   wallet_storage_url: string
   server_public_key: string | null
   server_key_status: string
+  server_name: string
+  newsstand_label: string
+  tagline: string
+  meta_title: string
+  meta_description: string | null
+  theme_primary: string
+  theme_accent: string
+  theme_background: string
+  theme_surface: string
+  theme_text: string
+  theme_muted: string
+  theme_border: string
+  logo_url: string | null
+  icon_url: string | null
+  og_image_url: string | null
 }
 
 export async function getSettings (trx: Knex = db): Promise<ServerSettings> {

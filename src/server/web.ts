@@ -13,14 +13,55 @@ export interface PageMeta {
   description: string
   canonicalPath: string
   imagePath: string
+  siteName: string
+  themeColor: string
   type?: 'website' | 'article'
   publishedAt?: string | null
   structuredData?: Record<string, unknown>
 }
 
+export interface AppearanceMeta {
+  serverName?: string
+  newsstandLabel?: string
+  tagline?: string
+  metaTitle?: string
+  metaDescription?: string
+  theme?: {
+    primary?: string
+    accent?: string
+    background?: string
+    surface?: string
+    text?: string
+    muted?: string
+    border?: string
+  }
+  logoUrl?: string | null
+  iconUrl?: string | null
+  ogImageUrl?: string | null
+}
+
 const DEFAULT_ORIGIN = 'https://papertrade.metanet.app'
 const DEFAULT_DESCRIPTION = 'PaperTrade is a BSV newsstand where readers preview page 1 free and pay per page for independent writing with a BRC100 wallet.'
 const THEME_COLOR = '#1f4f46'
+const DEFAULT_APPEARANCE: Required<Omit<AppearanceMeta, 'theme'>> & { theme: Required<NonNullable<AppearanceMeta['theme']>> } = {
+  serverName: 'PaperTrade',
+  newsstandLabel: 'Newsstand',
+  tagline: 'Read page 1 free. Pay per page after that with a BRC100 wallet.',
+  metaTitle: 'PaperTrade | BSV per-page publishing newsstand',
+  metaDescription: DEFAULT_DESCRIPTION,
+  logoUrl: null,
+  iconUrl: null,
+  ogImageUrl: null,
+  theme: {
+    primary: THEME_COLOR,
+    accent: '#b2772c',
+    background: '#f7f5ef',
+    surface: '#ffffff',
+    text: '#20231f',
+    muted: '#5c6570',
+    border: '#ddd8ca'
+  }
+}
 
 export function hostingOrigin (): string {
   const raw = process.env.HOSTING_DOMAIN ?? DEFAULT_ORIGIN
@@ -54,48 +95,69 @@ function safeJsonScript (value: Record<string, unknown>): string {
   return JSON.stringify(value).replace(/</g, '\\u003c')
 }
 
-export function appManifest (serverPublicKey?: string): Record<string, unknown> {
-  const metanet = metanetManifest(serverPublicKey)
+function normalizeAppearance (appearance?: AppearanceMeta | null): typeof DEFAULT_APPEARANCE {
   return {
-    name: 'PaperTrade',
-    short_name: 'PaperTrade',
-    description: DEFAULT_DESCRIPTION,
+    ...DEFAULT_APPEARANCE,
+    ...appearance,
+    serverName: appearance?.serverName?.trim() !== '' && appearance?.serverName != null ? appearance.serverName : DEFAULT_APPEARANCE.serverName,
+    newsstandLabel: appearance?.newsstandLabel?.trim() !== '' && appearance?.newsstandLabel != null ? appearance.newsstandLabel : DEFAULT_APPEARANCE.newsstandLabel,
+    tagline: appearance?.tagline?.trim() !== '' && appearance?.tagline != null ? appearance.tagline : DEFAULT_APPEARANCE.tagline,
+    metaTitle: appearance?.metaTitle?.trim() !== '' && appearance?.metaTitle != null ? appearance.metaTitle : DEFAULT_APPEARANCE.metaTitle,
+    metaDescription: appearance?.metaDescription?.trim() !== '' && appearance?.metaDescription != null ? appearance.metaDescription : DEFAULT_APPEARANCE.metaDescription,
+    logoUrl: appearance?.logoUrl ?? null,
+    iconUrl: appearance?.iconUrl ?? null,
+    ogImageUrl: appearance?.ogImageUrl ?? null,
+    theme: {
+      ...DEFAULT_APPEARANCE.theme,
+      ...appearance?.theme
+    }
+  }
+}
+
+export function appManifest (serverPublicKey?: string, appearance?: AppearanceMeta | null): Record<string, unknown> {
+  const app = normalizeAppearance(appearance)
+  const metanet = metanetManifest(serverPublicKey)
+  const icon = app.iconUrl ?? '/icon.svg'
+  return {
+    name: app.serverName,
+    short_name: app.serverName.slice(0, 24),
+    description: app.metaDescription,
     id: '/',
     start_url: '/',
     scope: '/',
     display: 'standalone',
     display_override: ['window-controls-overlay', 'standalone', 'browser'],
-    background_color: '#f7f5ef',
-    theme_color: THEME_COLOR,
+    background_color: app.theme.background,
+    theme_color: app.theme.primary,
     orientation: 'any',
     categories: ['books', 'news', 'finance', 'productivity'],
     lang: 'en-US',
     dir: 'ltr',
     icons: [
       { src: '/favicon.svg', sizes: 'any', type: 'image/svg+xml', purpose: 'any' },
-      { src: '/icon.svg', sizes: 'any', type: 'image/svg+xml', purpose: 'any maskable' }
+      { src: icon, sizes: 'any', type: icon.endsWith('.svg') ? 'image/svg+xml' : 'image/png', purpose: 'any maskable' }
     ],
     shortcuts: [
       {
-        name: 'Newsstand',
+        name: app.newsstandLabel,
         short_name: 'Read',
-        description: 'Browse live PaperTrade publications.',
+        description: `Browse live ${app.serverName} publications.`,
         url: '/',
-        icons: [{ src: '/icon.svg', sizes: 'any', type: 'image/svg+xml' }]
+        icons: [{ src: icon, sizes: 'any', type: icon.endsWith('.svg') ? 'image/svg+xml' : 'image/png' }]
       },
       {
         name: 'Author',
         short_name: 'Author',
         description: 'Manage your author profile and publications.',
         url: '/author',
-        icons: [{ src: '/icon.svg', sizes: 'any', type: 'image/svg+xml' }]
+        icons: [{ src: icon, sizes: 'any', type: icon.endsWith('.svg') ? 'image/svg+xml' : 'image/png' }]
       },
       {
-        name: 'About PaperTrade',
+        name: `About ${app.serverName}`,
         short_name: 'About',
-        description: 'Learn how PaperTrade works and deploy your own server.',
+        description: `Learn how ${app.serverName} works and deploy your own server.`,
         url: '/about',
-        icons: [{ src: '/icon.svg', sizes: 'any', type: 'image/svg+xml' }]
+        icons: [{ src: icon, sizes: 'any', type: icon.endsWith('.svg') ? 'image/svg+xml' : 'image/png' }]
       }
     ],
     share_target: {
@@ -179,13 +241,14 @@ function metanetManifest (serverPublicKey?: string): Record<string, unknown> {
   }
 }
 
-export function walletManifest (serverPublicKey: string): Record<string, unknown> {
+export function walletManifest (serverPublicKey: string, appearance?: AppearanceMeta | null): Record<string, unknown> {
+  const app = normalizeAppearance(appearance)
   return {
-    ...appManifest(serverPublicKey),
+    ...appManifest(serverPublicKey, app),
     originator: new URL(hostingOrigin()).hostname,
     homepage_url: hostingOrigin(),
     app_url: hostingOrigin(),
-    icon_url: absoluteUrl('/icon.svg')
+    icon_url: absoluteUrl(app.iconUrl ?? '/icon.svg')
   }
 }
 
@@ -196,15 +259,18 @@ function legacyBabbageManifest (metanet: Record<string, unknown>): Record<string
   }
 }
 
-export function metaForPath (pathName: string, publication?: PublicPublicationMeta | null): PageMeta {
+export function metaForPath (pathName: string, publication?: PublicPublicationMeta | null, appearance?: AppearanceMeta | null): PageMeta {
+  const app = normalizeAppearance(appearance)
   if (publication != null) {
     const canonicalPath = `/publication/${publication.id}`
-    const description = trimDescription(publication.description ?? `${publication.title} on PaperTrade.`)
+    const description = trimDescription(publication.description ?? `${publication.title} on ${app.serverName}.`, app.metaDescription)
     return {
-      title: `${publication.title} | PaperTrade`,
+      title: `${publication.title} | ${app.serverName}`,
       description,
       canonicalPath,
       imagePath: publication.coverUrl ?? `/api/publications/${publication.id}/cover`,
+      siteName: app.serverName,
+      themeColor: app.theme.primary,
       type: 'article',
       publishedAt: publication.publishedAt,
       structuredData: {
@@ -214,7 +280,7 @@ export function metaForPath (pathName: string, publication?: PublicPublicationMe
         description,
         author: {
           '@type': 'Person',
-          name: publication.authorName ?? 'PaperTrade author'
+          name: publication.authorName ?? `${app.serverName} author`
         },
         isAccessibleForFree: 'False',
         url: absoluteUrl(canonicalPath),
@@ -227,15 +293,17 @@ export function metaForPath (pathName: string, publication?: PublicPublicationMe
 
   if (pathName === '/about') {
     return {
-      title: 'About PaperTrade | BSV per-page publishing',
-      description: 'PaperTrade is an open-source BSV newsstand for per-page writing, BRC100 wallet onboarding, author payouts, and self-hosted publishing servers.',
+      title: `About ${app.serverName} | BSV per-page publishing`,
+      description: trimDescription(app.metaDescription),
       canonicalPath: '/about',
-      imagePath: '/og-image.svg',
+      imagePath: app.ogImageUrl ?? '/og-image.svg',
+      siteName: app.serverName,
+      themeColor: app.theme.primary,
       type: 'website',
       structuredData: {
         '@context': 'https://schema.org',
         '@type': 'SoftwareApplication',
-        name: 'PaperTrade',
+        name: app.serverName,
         applicationCategory: 'PublishingApplication',
         operatingSystem: 'Web',
         url: absoluteUrl('/about'),
@@ -247,17 +315,19 @@ export function metaForPath (pathName: string, publication?: PublicPublicationMe
 
   const isReader = pathName.startsWith('/read/')
   return {
-    title: isReader ? 'Read on PaperTrade' : 'PaperTrade | BSV per-page publishing newsstand',
-    description: isReader ? 'Read page 1 free, then use a BRC100 wallet for paid PaperTrade pages.' : DEFAULT_DESCRIPTION,
+    title: isReader ? `Read on ${app.serverName}` : app.metaTitle,
+    description: isReader ? `Read page 1 free, then use a BRC100 wallet for paid ${app.serverName} pages.` : trimDescription(app.metaDescription),
     canonicalPath: isReader ? pathName : '/',
-    imagePath: '/og-image.svg',
+    imagePath: app.ogImageUrl ?? '/og-image.svg',
+    siteName: app.serverName,
+    themeColor: app.theme.primary,
     type: 'website',
     structuredData: {
       '@context': 'https://schema.org',
       '@type': 'WebSite',
-      name: 'PaperTrade',
+      name: app.serverName,
       url: hostingOrigin(),
-      description: DEFAULT_DESCRIPTION
+      description: trimDescription(app.metaDescription)
     }
   }
 }
@@ -269,19 +339,19 @@ export function renderHtmlShell (template: string, meta: PageMeta): string {
     `<title>${escapeHtml(meta.title)}</title>`,
     `<meta name="description" content="${escapeHtml(meta.description)}" />`,
     `<link rel="canonical" href="${escapeHtml(canonical)}" />`,
-    '<meta property="og:site_name" content="PaperTrade" />',
+    `<meta property="og:site_name" content="${escapeHtml(meta.siteName)}" />`,
     `<meta property="og:title" content="${escapeHtml(meta.title)}" />`,
     `<meta property="og:description" content="${escapeHtml(meta.description)}" />`,
     `<meta property="og:url" content="${escapeHtml(canonical)}" />`,
     `<meta property="og:type" content="${meta.type ?? 'website'}" />`,
     `<meta property="og:image" content="${escapeHtml(image)}" />`,
-    '<meta property="og:image:alt" content="PaperTrade publication preview" />',
+    `<meta property="og:image:alt" content="${escapeHtml(`${meta.siteName} publication preview`)}" />`,
     meta.publishedAt != null ? `<meta property="article:published_time" content="${escapeHtml(meta.publishedAt)}" />` : '',
     '<meta name="twitter:card" content="summary_large_image" />',
     `<meta name="twitter:title" content="${escapeHtml(meta.title)}" />`,
     `<meta name="twitter:description" content="${escapeHtml(meta.description)}" />`,
     `<meta name="twitter:image" content="${escapeHtml(image)}" />`,
-    `<meta name="theme-color" content="${THEME_COLOR}" />`,
+    `<meta name="theme-color" content="${escapeHtml(meta.themeColor)}" />`,
     meta.structuredData != null ? `<script type="application/ld+json">${safeJsonScript(meta.structuredData)}</script>` : ''
   ].filter(Boolean).join('\n    ')
 

@@ -3,7 +3,7 @@ import { createRoot } from 'react-dom/client'
 import { BrowserRouter, Link, Route, Routes, useLocation, useNavigate, useParams } from 'react-router-dom'
 import { AuthFetch, Utils, WalletClient } from '@bsv/sdk'
 import { IdentityCard } from '@bsv/identity-react'
-import { BookOpen, Check, ExternalLink, FileText, Github, Home, Info, Library, MessageCircle, Monitor, RefreshCw, Settings, Share2, Smartphone, Upload, User } from 'lucide-react'
+import { BookOpen, Check, ExternalLink, FileText, Github, Home, Image, Info, Library, MessageCircle, Monitor, Palette, RefreshCw, Settings, Share2, Smartphone, Upload, User } from 'lucide-react'
 import './styles.css'
 
 type WalletSubstrate = 'auto' | 'json-api' | 'secure-json-api' | 'react-native' | 'Cicada' | 'XDM' | 'window.CWI'
@@ -18,6 +18,27 @@ interface Status {
   displayUnit: 'sats' | 'usd_cents'
   walletStorageUrl: string
   serverPublicKey?: string
+  appearance: Appearance
+}
+
+interface Appearance {
+  serverName: string
+  newsstandLabel: string
+  tagline: string
+  metaTitle: string
+  metaDescription: string
+  theme: {
+    primary: string
+    accent: string
+    background: string
+    surface: string
+    text: string
+    muted: string
+    border: string
+  }
+  logoUrl?: string | null
+  iconUrl?: string | null
+  ogImageUrl?: string | null
 }
 
 interface Publication {
@@ -73,6 +94,14 @@ interface ServerWallet {
   balanceSats: number
 }
 
+interface AdminSettings {
+  mode: 'private_publish' | 'public_submissions'
+  pricePerPageSats: number
+  commissionBps: number
+  displayUnit: 'sats' | 'usd_cents'
+  walletStorageUrl: string
+}
+
 const API = '/api'
 const WALLET_ORIGINATOR = (import.meta as any).env?.VITE_WALLET_ORIGINATOR ?? window.location.hostname
 const WALLET_SUBSTRATE_OVERRIDE = (import.meta as any).env?.VITE_WALLET_SUBSTRATE as string | undefined
@@ -87,6 +116,25 @@ const BSV_BROWSER_URL = 'https://desktop.bsvb.tech/'
 const PAPERTRADE_GITHUB_URL = 'https://github.com/p2ppsr/PaperTrade'
 const WALLET_TIMEOUT_MS = 20000
 let walletRequestQueue: Promise<unknown> = Promise.resolve()
+const DEFAULT_APPEARANCE: Appearance = {
+  serverName: 'PaperTrade',
+  newsstandLabel: 'Newsstand',
+  tagline: 'Read page 1 free. Pay per page after that with a BRC100 wallet.',
+  metaTitle: 'PaperTrade | BSV per-page publishing newsstand',
+  metaDescription: 'PaperTrade is a BSV newsstand where readers preview page 1 free and pay per page for independent writing with a BRC100 wallet.',
+  theme: {
+    primary: '#1f4f46',
+    accent: '#b2772c',
+    background: '#f7f5ef',
+    surface: '#ffffff',
+    text: '#20231f',
+    muted: '#5c6570',
+    border: '#ddd8ca'
+  },
+  logoUrl: null,
+  iconUrl: null,
+  ogImageUrl: null
+}
 
 interface WalletOption {
   label: string
@@ -134,14 +182,15 @@ async function fileToBase64 (file: File): Promise<string> {
   })
 }
 
-async function uploadJsonFile (url: string, file: File): Promise<Response> {
+async function uploadJsonFile (url: string, file: File, extra?: Record<string, unknown>): Promise<Response> {
   return await authFetch(url, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify({
       fileName: file.name,
       mimeType: file.type === '' ? 'application/octet-stream' : file.type,
-      dataBase64: await fileToBase64(file)
+      dataBase64: await fileToBase64(file),
+      ...extra
     })
   })
 }
@@ -154,6 +203,30 @@ function setClientMeta (title: string, description: string): void {
   document.title = title
   const descriptionTag = document.querySelector<HTMLMetaElement>('meta[name="description"]')
   if (descriptionTag != null) descriptionTag.content = description
+}
+
+function appearanceFromStatus (status: Status | null): Appearance {
+  return {
+    ...DEFAULT_APPEARANCE,
+    ...(status?.appearance ?? {}),
+    theme: {
+      ...DEFAULT_APPEARANCE.theme,
+      ...(status?.appearance?.theme ?? {})
+    }
+  }
+}
+
+function appearanceStyle (appearance: Appearance): React.CSSProperties {
+  const style: React.CSSProperties & Record<string, string> = {
+    '--pt-primary': appearance.theme.primary,
+    '--pt-accent': appearance.theme.accent,
+    '--pt-background': appearance.theme.background,
+    '--pt-surface': appearance.theme.surface,
+    '--pt-text': appearance.theme.text,
+    '--pt-muted': appearance.theme.muted,
+    '--pt-border': appearance.theme.border
+  }
+  return style
 }
 
 async function sharePaperTrade ({ title, text, path }: { title: string, text: string, path: string }): Promise<string> {
@@ -373,39 +446,51 @@ function platformWalletOptions (): WalletOption[] {
 }
 
 function WalletHelp ({ message, freePageUrl }: { message: string, freePageUrl?: string }): JSX.Element | null {
+  const [dismissed, setDismissed] = useState(false)
+  useEffect(() => { setDismissed(false) }, [message])
   if (!isWalletHelpMessage(message)) return null
+  if (dismissed) {
+    return (
+      <button className='button wallet-reopen' type='button' onClick={() => setDismissed(false)}>
+        <Smartphone size={18} /> Wallet help
+      </button>
+    )
+  }
   const options = platformWalletOptions()
   const hasWallet = hasEmbeddedWalletBridge()
   return (
-    <section className='wallet-help'>
-      <div className='wallet-help-copy'>
-        <span className='step-label'>{hasWallet ? 'Wallet connected' : 'Wallet needed'}</span>
-        <h2>{hasWallet ? 'Approve this wallet request' : 'Continue with a BRC100 wallet'}</h2>
-        <p>
-          {hasWallet
-            ? 'PaperTrade is open in a compatible wallet browser. Sign in if needed, approve any pending wallet prompt, then retry this page.'
-            : 'You have reached a wallet-protected step. Install a compatible wallet browser, open PaperTrade there, and return to this page to continue.'}
-        </p>
-      </div>
-      {!hasWallet && (
-        <div className='wallet-options'>
-          {options.map(option => (
-            <a className='wallet-option' href={option.href} target='_blank' rel='noreferrer' key={option.label}>
-              {option.icon === 'phone' ? <Smartphone size={20} /> : <Monitor size={20} />}
-              <span>
-                <strong>{option.label}</strong>
-                <small>{option.description}</small>
-              </span>
-              <ExternalLink size={16} />
-            </a>
-          ))}
+    <div className='wallet-popover-backdrop' role='presentation'>
+      <section className='wallet-help' role='dialog' aria-label='Wallet help'>
+        <button className='wallet-close' type='button' onClick={() => setDismissed(true)}>Close</button>
+        <div className='wallet-help-copy'>
+          <span className='step-label'>{hasWallet ? 'Wallet connected' : 'Wallet needed'}</span>
+          <h2>{hasWallet ? 'Approve this wallet request' : 'Continue with a BRC100 wallet'}</h2>
+          <p>
+            {hasWallet
+              ? 'PaperTrade is open in a compatible wallet browser. Sign in if needed, approve any pending wallet prompt, then retry this page.'
+              : 'You have reached a wallet-protected step. Install a compatible wallet browser, open PaperTrade there, and return to this page to continue.'}
+          </p>
         </div>
-      )}
-      <div className='wallet-actions'>
-        {freePageUrl != null && <Link className='button secondary' to={freePageUrl}><BookOpen size={18} /> Read page 1 free</Link>}
-        <button type='button' onClick={() => window.location.reload()}><RefreshCw size={18} /> Retry</button>
-      </div>
-    </section>
+        {!hasWallet && (
+          <div className='wallet-options'>
+            {options.map(option => (
+              <a className='wallet-option' href={option.href} target='_blank' rel='noreferrer' key={option.label}>
+                {option.icon === 'phone' ? <Smartphone size={20} /> : <Monitor size={20} />}
+                <span>
+                  <strong>{option.label}</strong>
+                  <small>{option.description}</small>
+                </span>
+                <ExternalLink size={16} />
+              </a>
+            ))}
+          </div>
+        )}
+        <div className='wallet-actions'>
+          {freePageUrl != null && <Link className='button secondary' to={freePageUrl}><BookOpen size={18} /> Read page 1 free</Link>}
+          <button type='button' onClick={() => window.location.reload()}><RefreshCw size={18} /> Retry</button>
+        </div>
+      </section>
+    </div>
   )
 }
 
@@ -511,12 +596,18 @@ function useStatus (): [Status | null, () => Promise<void>] {
 }
 
 function Shell ({ children, status }: { children: React.ReactNode, status: Status | null }): JSX.Element {
+  const appearance = appearanceFromStatus(status)
   return (
-    <div className='app-shell'>
+    <div className='app-shell' style={appearanceStyle(appearance)}>
       <aside className='side'>
-        <Link className='brand' to='/'><Library size={26} /> PaperTrade</Link>
+        <Link className='brand' to='/'>
+          {appearance.logoUrl != null && appearance.logoUrl !== ''
+            ? <img className='brand-logo' src={appearance.logoUrl} alt='' />
+            : <Library size={26} />}
+          <span>{appearance.serverName}</span>
+        </Link>
         <nav>
-          <Link to='/'><Home size={18} /> Newsstand</Link>
+          <Link to='/'><Home size={18} /> {appearance.newsstandLabel}</Link>
           <Link to='/author'><User size={18} /> Author</Link>
           <Link to='/admin'><Settings size={18} /> Admin</Link>
           <Link to='/about'><Info size={18} /> About</Link>
@@ -531,22 +622,23 @@ function Shell ({ children, status }: { children: React.ReactNode, status: Statu
   )
 }
 
-function Newsstand (): JSX.Element {
+function Newsstand ({ status }: { status: Status | null }): JSX.Element {
+  const appearance = appearanceFromStatus(status)
   const [publications, setPublications] = useState<Publication[]>([])
   useEffect(() => {
-    setClientMeta('PaperTrade | BSV per-page publishing newsstand', 'Read page 1 free. Pay per page after that with a BRC100 wallet.')
+    setClientMeta(appearance.metaTitle, appearance.metaDescription)
     void fetch(`${API}/publications`).then(async res => await res.json()).then(json => {
       const rows = json.publications ?? []
       setPublications(rows)
       postSignal('newsstand.loaded', usercomMetadata({ surface: 'newsstand', tags: ['reader'], context: { publicationCount: rows.length } }))
     })
-  }, [])
+  }, [appearance.metaDescription, appearance.metaTitle])
   return (
     <section className='surface'>
       <header className='page-head newsstand-head'>
         <div>
-          <h1>Newsstand</h1>
-          <p>Read page 1 free. Pay per page after that with a BRC100 wallet.</p>
+          <h1>{appearance.newsstandLabel}</h1>
+          <p>{appearance.tagline}</p>
         </div>
       </header>
       <div className='publication-grid'>
@@ -700,13 +792,19 @@ function AuthorPreview (): JSX.Element {
 }
 
 function Setup ({ status, refresh }: { status: Status | null, refresh: () => Promise<void> }): JSX.Element {
+  const currentAppearance = appearanceFromStatus(status)
   const [form, setForm] = useState({
     pricePerPageSats: status?.pricePerPageSats ?? 25,
     commissionBps: status?.commissionBps ?? 1000,
     displayUnit: status?.displayUnit ?? 'sats',
     walletStorageUrl: status?.walletStorageUrl ?? 'https://storage.babbage.systems',
     mode: status?.mode ?? 'private_publish',
-    serverPrivateKey: ''
+    serverPrivateKey: '',
+    appearance: {
+      serverName: currentAppearance.serverName,
+      newsstandLabel: currentAppearance.newsstandLabel,
+      tagline: currentAppearance.tagline
+    }
   })
   const [message, setMessage] = useState('')
   useEffect(() => {
@@ -717,7 +815,13 @@ function Setup ({ status, refresh }: { status: Status | null, refresh: () => Pro
         commissionBps: status.commissionBps,
         displayUnit: status.displayUnit,
         mode: status.mode,
-        walletStorageUrl: status.walletStorageUrl
+        walletStorageUrl: status.walletStorageUrl,
+        appearance: {
+          ...f.appearance,
+          serverName: status.appearance.serverName,
+          newsstandLabel: status.appearance.newsstandLabel,
+          tagline: status.appearance.tagline
+        }
       }))
     }
   }, [status])
@@ -768,7 +872,13 @@ function Setup ({ status, refresh }: { status: Status | null, refresh: () => Pro
           <p className='hint'>{form.commissionBps / 100}% platform share. Reader payments are still settled in BSV.</p>
         </section>
         <section className='tool-panel'>
-          <span className='step-label'>3 Wallet</span>
+          <span className='step-label'>3 Identity</span>
+          <label>Server name <input value={form.appearance.serverName} onChange={e => setForm({ ...form, appearance: { ...form.appearance, serverName: e.target.value } })} /></label>
+          <label>Reader section label <input value={form.appearance.newsstandLabel} onChange={e => setForm({ ...form, appearance: { ...form.appearance, newsstandLabel: e.target.value } })} /></label>
+          <label>Reader tagline <input value={form.appearance.tagline} onChange={e => setForm({ ...form, appearance: { ...form.appearance, tagline: e.target.value } })} /></label>
+        </section>
+        <section className='tool-panel'>
+          <span className='step-label'>4 Wallet</span>
           <label>Wallet Storage URL <input value={form.walletStorageUrl} onChange={e => setForm({ ...form, walletStorageUrl: e.target.value })} /></label>
           <label>Server private key <input value={form.serverPrivateKey} onChange={e => setForm({ ...form, serverPrivateKey: e.target.value })} placeholder='Optional replacement key' /></label>
           <p className='hint'>The first BRC100 identity to save setup becomes an admin.</p>
@@ -1047,12 +1157,21 @@ function Author ({ status }: { status: Status | null }): JSX.Element {
   )
 }
 
-function Admin (): JSX.Element {
+function Admin ({ status, refreshStatus }: { status: Status | null, refreshStatus: () => Promise<void> }): JSX.Element {
+  const [activeTab, setActiveTab] = useState<'review' | 'appearance' | 'wallet' | 'admins' | 'payouts'>('review')
   const [message, setMessage] = useState('')
   const [publications, setPublications] = useState<AdminPublication[]>([])
   const [authorBalances, setAuthorBalances] = useState<any[]>([])
   const [payouts, setPayouts] = useState<any[]>([])
   const [admins, setAdmins] = useState<AdminUser[]>([])
+  const [appearance, setAppearance] = useState<Appearance>(appearanceFromStatus(status))
+  const [adminSettings, setAdminSettings] = useState<AdminSettings>({
+    mode: status?.mode ?? 'private_publish',
+    pricePerPageSats: status?.pricePerPageSats ?? 25,
+    commissionBps: status?.commissionBps ?? 1000,
+    displayUnit: status?.displayUnit ?? 'sats',
+    walletStorageUrl: status?.walletStorageUrl ?? 'https://storage.babbage.systems'
+  })
   const [newAdminKey, setNewAdminKey] = useState('')
   const [serverWallet, setServerWallet] = useState<ServerWallet | null>(null)
   const [fundAmountSats, setFundAmountSats] = useState(1000)
@@ -1084,9 +1203,63 @@ function Admin (): JSX.Element {
     setAuthorBalances(ledgerJson.authorBalances ?? [])
     setPayouts(paymentJson.payouts ?? [])
     setAdmins(settingsJson.admins ?? [])
+    const loadedSettings = settingsJson.settings ?? {}
+    setAdminSettings({
+      mode: loadedSettings.mode ?? 'private_publish',
+      pricePerPageSats: Number(loadedSettings.price_per_page_sats ?? 25),
+      commissionBps: Number(loadedSettings.commission_bps ?? 1000),
+      displayUnit: loadedSettings.display_unit ?? 'sats',
+      walletStorageUrl: loadedSettings.wallet_storage_url ?? 'https://storage.babbage.systems'
+    })
+    setAppearance({
+      ...DEFAULT_APPEARANCE,
+      ...(settingsJson.appearance ?? {}),
+      theme: {
+        ...DEFAULT_APPEARANCE.theme,
+        ...(settingsJson.appearance?.theme ?? {})
+      }
+    })
     setServerWallet({ serverPublicKey: walletJson.serverPublicKey, balanceSats: Number(walletJson.balanceSats ?? 0) })
   }
   useEffect(() => { void refresh().catch(err => setMessage(friendlyErrorMessage(err, 'Could not load admin workspace'))) }, [])
+  useEffect(() => {
+    if (status == null) return
+    setAppearance(appearanceFromStatus(status))
+    setAdminSettings({
+      mode: status.mode,
+      pricePerPageSats: status.pricePerPageSats,
+      commissionBps: status.commissionBps,
+      displayUnit: status.displayUnit,
+      walletStorageUrl: status.walletStorageUrl
+    })
+  }, [status])
+  const saveAppearance = async (): Promise<void> => {
+    const res = await authFetch(`${API}/admin/settings`, {
+      method: 'PUT',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        mode: adminSettings.mode,
+        pricePerPageSats: adminSettings.pricePerPageSats,
+        commissionBps: adminSettings.commissionBps,
+        displayUnit: adminSettings.displayUnit,
+        walletStorageUrl: adminSettings.walletStorageUrl,
+        appearance
+      })
+    })
+    const json = await res.json().catch(() => ({}))
+    if (!res.ok) throw new Error(json.message ?? 'Could not save appearance')
+    await Promise.all([refresh(), refreshStatus()])
+    setMessage('Appearance preferences saved.')
+    postSignal('admin.appearance_saved', usercomMetadata({ surface: 'admin-appearance', tags: ['appearance'], context: { serverName: appearance.serverName, newsstandLabel: appearance.newsstandLabel } }))
+  }
+  const uploadAppearanceAsset = async (kind: 'logo' | 'icon' | 'og_image', file: File): Promise<void> => {
+    const res = await uploadJsonFile(`${API}/admin/appearance/assets`, file, { kind })
+    const json = await res.json().catch(() => ({}))
+    if (!res.ok || typeof json.url !== 'string') throw new Error(json.message ?? 'Could not upload appearance image')
+    const field = kind === 'logo' ? 'logoUrl' : kind === 'icon' ? 'iconUrl' : 'ogImageUrl'
+    setAppearance(current => ({ ...current, [field]: json.url }))
+    setMessage('Image uploaded. Save appearance to publish it.')
+  }
   const review = async (id: string, action: 'publish' | 'reject' | 'unpublish' | 'return_to_review'): Promise<void> => {
     const res = await authFetch(`${API}/admin/publications/${id}/review`, {
       method: 'POST',
@@ -1151,117 +1324,186 @@ function Admin (): JSX.Element {
     setMessage(payoutStatus === 'failed' ? `Payout failed: ${json.failureReason ?? 'unknown error'}` : `Payout ${payoutStatus}.`)
     postSignal('admin.payout_created', usercomMetadata({ surface: 'admin', tags: [`status:${payoutStatus}`], context: { authorIdentityKey: payoutForm.authorIdentityKey, amountSats: payoutForm.amountSats, destinationType: payoutForm.destinationType } }))
   }
+  const reviewCount = publications.filter(pub => pub.status === 'submitted' || pub.status === 'draft').length
   return (
     <section className='surface'>
       <header className='page-head'>
         <div>
           <h1>Admin</h1>
-          <p>Review submitted publications and manage server configuration.</p>
+          <p>Review publications, tune the public experience, and manage server operations.</p>
         </div>
         <Link className='button secondary' to='/setup'>Server setup</Link>
       </header>
-      <section className='tool-panel'>
-        <h2>Publication review</h2>
-        {publications.map(pub => (
-          <article className='review-card' key={pub.id}>
-            <div className='review-main'>
-              <div>
-                <span className={`status-pill status-${pub.status}`}>{pub.status}</span>
-                <h3>{pub.title}</h3>
-                <p>{pub.description ?? 'No description provided.'}</p>
+      <div className='admin-tabs' role='tablist' aria-label='Admin sections'>
+        <button className={activeTab === 'review' ? 'tab active' : 'tab'} type='button' onClick={() => setActiveTab('review')}><FileText size={18} /> Review <span>{reviewCount}</span></button>
+        <button className={activeTab === 'appearance' ? 'tab active' : 'tab'} type='button' onClick={() => setActiveTab('appearance')}><Palette size={18} /> Appearance</button>
+        <button className={activeTab === 'wallet' ? 'tab active' : 'tab'} type='button' onClick={() => setActiveTab('wallet')}><Library size={18} /> Wallet</button>
+        <button className={activeTab === 'admins' ? 'tab active' : 'tab'} type='button' onClick={() => setActiveTab('admins')}><User size={18} /> Admins</button>
+        <button className={activeTab === 'payouts' ? 'tab active' : 'tab'} type='button' onClick={() => setActiveTab('payouts')}><Check size={18} /> Payouts</button>
+      </div>
+      {activeTab === 'review' && (
+        <section className='tool-panel'>
+          <h2>Publication review</h2>
+          {publications.map(pub => (
+            <article className='review-card' key={pub.id}>
+              <div className='review-main'>
+                <div>
+                  <span className={`status-pill status-${pub.status}`}>{pub.status}</span>
+                  <h3>{pub.title}</h3>
+                  <p>{pub.description ?? 'No description provided.'}</p>
+                </div>
+                <div className='review-meta'>
+                  <IdentityPill identityKey={pub.author_identity_key} label={pub.display_name} />
+                  <span>{Number(pub.page_count ?? 0)} pages</span>
+                </div>
               </div>
-              <div className='review-meta'>
-                <IdentityPill identityKey={pub.author_identity_key} label={pub.display_name} />
-                <span>{Number(pub.page_count ?? 0)} pages</span>
+              <div className='review-actions'>
+                {Number(pub.page_count ?? 0) > 0 && <Link className='button secondary' to={`/admin/read/${String(pub.id)}/1`}>Preview</Link>}
+                {pub.status === 'published'
+                  ? (
+                    <>
+                      <button type='button' onClick={() => { void review(pub.id, 'unpublish').catch(err => setMessage(err.message)) }}>Unpublish</button>
+                      <button type='button' className='secondary' onClick={() => { void review(pub.id, 'return_to_review').catch(err => setMessage(err.message)) }}>Return to review</button>
+                    </>
+                    )
+                  : (
+                    <>
+                      <button type='button' disabled={Number(pub.page_count ?? 0) < 5} onClick={() => { void review(pub.id, 'publish').catch(err => setMessage(err.message)) }}>Publish</button>
+                      <button type='button' className='danger' onClick={() => { void review(pub.id, 'reject').catch(err => setMessage(err.message)) }}>Reject and delete</button>
+                    </>
+                    )}
               </div>
+            </article>
+          ))}
+          {publications.length === 0 && <p className='empty'>No publications to review yet.</p>}
+        </section>
+      )}
+      {activeTab === 'appearance' && (
+        <section className='tool-panel appearance-workspace'>
+          <div className='appearance-form'>
+            <div>
+              <h2>Appearance preferences</h2>
+              <p className='hint'>These settings change the server name, public labels, install manifest, link previews, and the theme everyone sees.</p>
             </div>
-            <div className='review-actions'>
-              {Number(pub.page_count ?? 0) > 0 && <Link className='button secondary' to={`/admin/read/${String(pub.id)}/1`}>Preview</Link>}
-              {pub.status === 'published'
-                ? (
-                  <>
-                    <button type='button' onClick={() => { void review(pub.id, 'unpublish').catch(err => setMessage(err.message)) }}>Unpublish</button>
-                    <button type='button' className='secondary' onClick={() => { void review(pub.id, 'return_to_review').catch(err => setMessage(err.message)) }}>Return to review</button>
-                  </>
-                  )
-                : (
-                  <>
-                    <button type='button' disabled={Number(pub.page_count ?? 0) < 5} onClick={() => { void review(pub.id, 'publish').catch(err => setMessage(err.message)) }}>Publish</button>
-                    <button type='button' className='danger' onClick={() => { void review(pub.id, 'reject').catch(err => setMessage(err.message)) }}>Reject and delete</button>
-                  </>
-                  )}
+            <div className='form-grid two'>
+              <label>Server name <input value={appearance.serverName} onChange={e => setAppearance({ ...appearance, serverName: e.target.value })} /></label>
+              <label>{appearance.newsstandLabel} label <input value={appearance.newsstandLabel} onChange={e => setAppearance({ ...appearance, newsstandLabel: e.target.value })} /></label>
             </div>
-          </article>
-        ))}
-        {publications.length === 0 && <p className='empty'>No publications to review yet.</p>}
-      </section>
-      <section className='tool-panel publication-list'>
-        <h2>Server wallet</h2>
-        <div className='wallet-summary'>
-          <div>
-            <span className='hint'>Spendable balance</span>
-            <strong>{serverWallet?.balanceSats ?? 0} sats</strong>
+            <label>Reader tagline <input value={appearance.tagline} onChange={e => setAppearance({ ...appearance, tagline: e.target.value })} /></label>
+            <label>Meta title <input value={appearance.metaTitle} onChange={e => setAppearance({ ...appearance, metaTitle: e.target.value })} /></label>
+            <label>Meta description <textarea value={appearance.metaDescription} onChange={e => setAppearance({ ...appearance, metaDescription: e.target.value })} /></label>
+            <div className='theme-grid'>
+              {([
+                ['primary', 'Primary'],
+                ['accent', 'Accent'],
+                ['background', 'Background'],
+                ['surface', 'Surface'],
+                ['text', 'Text'],
+                ['muted', 'Muted'],
+                ['border', 'Border']
+              ] as Array<[keyof Appearance['theme'], string]>).map(([key, label]) => (
+                <label className='color-field' key={key}>
+                  <span>{label}</span>
+                  <input type='color' value={appearance.theme[key]} onChange={e => setAppearance({ ...appearance, theme: { ...appearance.theme, [key]: e.target.value } })} />
+                  <input value={appearance.theme[key]} onChange={e => setAppearance({ ...appearance, theme: { ...appearance.theme, [key]: e.target.value } })} />
+                </label>
+              ))}
+            </div>
+            <div className='asset-grid'>
+              <label><Image size={18} /> Logo <input type='file' accept='image/png,image/jpeg,image/webp,image/gif' onChange={e => { const file = e.target.files?.[0]; if (file != null) void uploadAppearanceAsset('logo', file).catch(err => setMessage(err.message)) }} /></label>
+              <label><Image size={18} /> App icon <input type='file' accept='image/png,image/jpeg,image/webp,image/gif' onChange={e => { const file = e.target.files?.[0]; if (file != null) void uploadAppearanceAsset('icon', file).catch(err => setMessage(err.message)) }} /></label>
+              <label><Image size={18} /> Share image <input type='file' accept='image/png,image/jpeg,image/webp,image/gif' onChange={e => { const file = e.target.files?.[0]; if (file != null) void uploadAppearanceAsset('og_image', file).catch(err => setMessage(err.message)) }} /></label>
+            </div>
+            <button className='button primary-action' type='button' onClick={() => { void saveAppearance().catch(err => setMessage(err.message)) }}><Check size={18} /> Save appearance</button>
           </div>
-          <IdentityPill identityKey={serverWallet?.serverPublicKey} label='PaperTrade server' />
-        </div>
-        <form className='inline-form' onSubmit={e => { e.preventDefault(); void fundServer().catch(err => setMessage(friendlyErrorMessage(err, 'Could not fund server wallet'))) }}>
-          <label>Amount in sats <input type='number' min='1' value={fundAmountSats} onChange={e => setFundAmountSats(Number(e.target.value))} /></label>
-          <button className='button primary-action' type='submit'>Fund server wallet</button>
-        </form>
-        <p className='hint'>Funding uses the admin wallet you are using now. This gives the server wallet enough BSV to pay author withdrawals and cover fees.</p>
-      </section>
-      <section className='tool-panel publication-list'>
-        <h2>Admins</h2>
-        <form className='inline-form' onSubmit={e => { e.preventDefault(); void addAdmin().catch(err => setMessage(err.message)) }}>
-          <label>Identity key <input value={newAdminKey} onChange={e => setNewAdminKey(e.target.value)} placeholder='Admin identity key' /></label>
-          <button className='button primary-action' type='submit'>Add admin</button>
-        </form>
-        <div className='admin-list'>
-          {admins.map(admin => (
-            <div className='admin-list-row' key={admin.identity_key}>
-              <IdentityPill identityKey={admin.identity_key} />
-              <button type='button' className='danger' disabled={admins.length <= 1} onClick={() => { void removeAdmin(admin.identity_key).catch(err => setMessage(err.message)) }}>Remove</button>
+          <aside className='appearance-preview' style={appearanceStyle(appearance)}>
+            <div className='preview-brand'>
+              {appearance.logoUrl != null && appearance.logoUrl !== '' ? <img src={appearance.logoUrl} alt='' /> : <Library size={26} />}
+              <strong>{appearance.serverName}</strong>
+            </div>
+            <span className='step-label'>{appearance.newsstandLabel}</span>
+            <h2>{appearance.metaTitle}</h2>
+            <p>{appearance.tagline}</p>
+            <div className='preview-card'>
+              <span>Primary action</span>
+              <button type='button'>Open</button>
+            </div>
+          </aside>
+        </section>
+      )}
+      {activeTab === 'wallet' && (
+        <section className='tool-panel publication-list'>
+          <h2>Server wallet</h2>
+          <div className='wallet-summary'>
+            <div>
+              <span className='hint'>Spendable balance</span>
+              <strong>{serverWallet?.balanceSats ?? 0} sats</strong>
+            </div>
+            <IdentityPill identityKey={serverWallet?.serverPublicKey} label='PaperTrade server' />
+          </div>
+          <form className='inline-form' onSubmit={e => { e.preventDefault(); void fundServer().catch(err => setMessage(friendlyErrorMessage(err, 'Could not fund server wallet'))) }}>
+            <label>Amount in sats <input type='number' min='1' value={fundAmountSats} onChange={e => setFundAmountSats(Number(e.target.value))} /></label>
+            <button className='button primary-action' type='submit'>Fund server wallet</button>
+          </form>
+          <p className='hint'>Funding uses the admin wallet you are using now. This gives the server wallet enough BSV to pay author withdrawals and cover fees.</p>
+        </section>
+      )}
+      {activeTab === 'admins' && (
+        <section className='tool-panel publication-list'>
+          <h2>Admins</h2>
+          <form className='inline-form' onSubmit={e => { e.preventDefault(); void addAdmin().catch(err => setMessage(err.message)) }}>
+            <label>Identity key <input value={newAdminKey} onChange={e => setNewAdminKey(e.target.value)} placeholder='Admin identity key' /></label>
+            <button className='button primary-action' type='submit'>Add admin</button>
+          </form>
+          <div className='admin-list'>
+            {admins.map(admin => (
+              <div className='admin-list-row' key={admin.identity_key}>
+                <IdentityPill identityKey={admin.identity_key} />
+                <button type='button' className='danger' disabled={admins.length <= 1} onClick={() => { void removeAdmin(admin.identity_key).catch(err => setMessage(err.message)) }}>Remove</button>
+              </div>
+            ))}
+          </div>
+        </section>
+      )}
+      {activeTab === 'payouts' && (
+        <section className='tool-panel publication-list'>
+          <h2>Payouts</h2>
+          <p className='hint'>Select an author balance to fill the payout form. Failed payouts remain in history and do not reduce the author balance.</p>
+          <div className='admin-grid compact'>
+            <form onSubmit={e => { e.preventDefault(); void createPayout().catch(err => setMessage(err.message)) }}>
+              <label>Author identity key <input value={payoutForm.authorIdentityKey} onChange={e => setPayoutForm({ ...payoutForm, authorIdentityKey: e.target.value })} /></label>
+              <label>Amount in sats <input type='number' min='0' value={payoutForm.amountSats} onChange={e => setPayoutForm({ ...payoutForm, amountSats: Number(e.target.value) })} /></label>
+              <label>Destination type
+                <select value={payoutForm.destinationType} onChange={e => setPayoutForm({ ...payoutForm, destinationType: e.target.value })}>
+                  <option value='legacy_address'>Legacy BSV address</option>
+                  <option value='brc100_identity'>BRC100 identity key</option>
+                </select>
+              </label>
+              <label>Destination <input value={payoutForm.destination} onChange={e => setPayoutForm({ ...payoutForm, destination: e.target.value })} /></label>
+              <button className='button' type='submit'>Create payout</button>
+            </form>
+            <div>
+              <h2>Author balances</h2>
+              {authorBalances.map(balance => (
+                <button className='balance-row' type='button' key={balance.account_identity_key} onClick={() => setPayoutForm({ ...payoutForm, authorIdentityKey: balance.account_identity_key, amountSats: Number(balance.balance_sats ?? 0) })}>
+                  <IdentityPill identityKey={balance.account_identity_key} />
+                  <strong>{Number(balance.balance_sats ?? 0)} sats</strong>
+                </button>
+              ))}
+              {authorBalances.length === 0 && <p className='empty'>No author balances yet.</p>}
+            </div>
+          </div>
+          <h2>Payout history</h2>
+          {payouts.map(payout => (
+            <div className='row' key={payout.id}>
+              <span>{payout.amount_sats} sats</span>
+              <span>{payout.status}</span>
+              <span>{payout.destination_type}</span>
             </div>
           ))}
-        </div>
-      </section>
-      <section className='tool-panel publication-list'>
-        <h2>Payouts</h2>
-        <p className='hint'>Select an author balance to fill the payout form. Failed payouts remain in history and do not reduce the author balance.</p>
-        <div className='admin-grid compact'>
-          <form onSubmit={e => { e.preventDefault(); void createPayout().catch(err => setMessage(err.message)) }}>
-            <label>Author identity key <input value={payoutForm.authorIdentityKey} onChange={e => setPayoutForm({ ...payoutForm, authorIdentityKey: e.target.value })} /></label>
-            <label>Amount in sats <input type='number' min='0' value={payoutForm.amountSats} onChange={e => setPayoutForm({ ...payoutForm, amountSats: Number(e.target.value) })} /></label>
-            <label>Destination type
-              <select value={payoutForm.destinationType} onChange={e => setPayoutForm({ ...payoutForm, destinationType: e.target.value })}>
-                <option value='legacy_address'>Legacy BSV address</option>
-                <option value='brc100_identity'>BRC100 identity key</option>
-              </select>
-            </label>
-            <label>Destination <input value={payoutForm.destination} onChange={e => setPayoutForm({ ...payoutForm, destination: e.target.value })} /></label>
-            <button className='button' type='submit'>Create payout</button>
-          </form>
-          <div>
-            <h2>Author balances</h2>
-            {authorBalances.map(balance => (
-              <button className='balance-row' type='button' key={balance.account_identity_key} onClick={() => setPayoutForm({ ...payoutForm, authorIdentityKey: balance.account_identity_key, amountSats: Number(balance.balance_sats ?? 0) })}>
-                <IdentityPill identityKey={balance.account_identity_key} />
-                <strong>{Number(balance.balance_sats ?? 0)} sats</strong>
-              </button>
-            ))}
-            {authorBalances.length === 0 && <p className='empty'>No author balances yet.</p>}
-          </div>
-        </div>
-        <h2>Payout history</h2>
-        {payouts.map(payout => (
-          <div className='row' key={payout.id}>
-            <span>{payout.amount_sats} sats</span>
-            <span>{payout.status}</span>
-            <span>{payout.destination_type}</span>
-          </div>
-        ))}
-        {payouts.length === 0 && <p className='empty'>No payouts have been created yet.</p>}
-      </section>
+          {payouts.length === 0 && <p className='empty'>No payouts have been created yet.</p>}
+        </section>
+      )}
       {message !== '' && !isWalletHelpMessage(message) && <p className='notice'>{message}</p>}
       <WalletHelp message={message} />
     </section>
@@ -1269,27 +1511,28 @@ function Admin (): JSX.Element {
 }
 
 function About ({ status }: { status: Status | null }): JSX.Element {
+  const appearance = appearanceFromStatus(status)
   const walletOptions = platformWalletOptions()
   useEffect(() => {
-    setClientMeta('About PaperTrade | BSV per-page publishing', 'PaperTrade is an open-source BSV newsstand for per-page writing, BRC100 wallet onboarding, author payouts, and self-hosted publishing servers.')
-  }, [])
+    setClientMeta(`About ${appearance.serverName} | BSV per-page publishing`, appearance.metaDescription)
+  }, [appearance.metaDescription, appearance.serverName])
   return (
     <section className='surface about-surface'>
       <header className='page-head about-head'>
         <div>
           <span className='step-label'>Open BSV newsstand</span>
-          <h1>PaperTrade lets writing sell one page at a time.</h1>
-          <p>Readers preview the first page free, then use a BRC100 wallet for small per-page payments. Authors keep a server-side balance and can receive wallet payouts from their author workspace.</p>
+          <h1>{appearance.serverName} lets writing sell one page at a time.</h1>
+          <p>{appearance.metaDescription}</p>
         </div>
-        <ShareButton title='PaperTrade' text='A BSV per-page publishing newsstand.' path='/about' />
+        <ShareButton title={appearance.serverName} text={appearance.tagline} path='/about' />
       </header>
 
       <div className='about-grid'>
         <section className='tool-panel about-panel'>
           <BookOpen size={24} />
           <h2>For readers</h2>
-          <p>Start at the newsstand, read page 1, then continue in a compatible wallet browser when a paid page asks for authentication and payment.</p>
-          <Link className='button' to='/'>Open newsstand</Link>
+          <p>Start at the {appearance.newsstandLabel.toLowerCase()}, read page 1, then continue in a compatible wallet browser when a paid page asks for authentication and payment.</p>
+          <Link className='button' to='/'>Open {appearance.newsstandLabel.toLowerCase()}</Link>
         </section>
         <section className='tool-panel about-panel'>
           <User size={24} />
@@ -1329,7 +1572,7 @@ function About ({ status }: { status: Status | null }): JSX.Element {
           <a href='/.well-known/wallet-manifest.json' target='_blank' rel='noreferrer'>Well-known alias</a>
           <a href='/sitemap.xml' target='_blank' rel='noreferrer'>Sitemap</a>
         </div>
-        <p className='hint'>This server is {status?.setupComplete === true ? 'configured' : 'awaiting setup'} and currently runs in {status?.mode === 'public_submissions' ? 'public submission' : 'private publishing'} mode.</p>
+        <p className='hint'>{appearance.serverName} is {status?.setupComplete === true ? 'configured' : 'awaiting setup'} and currently runs in {status?.mode === 'public_submissions' ? 'public submission' : 'private publishing'} mode.</p>
       </section>
     </section>
   )
@@ -1345,12 +1588,12 @@ function AppRoutes ({ status, refresh }: { status: Status | null, refresh: () =>
         <div className='setup-banner'><Link to='/setup'>Complete first-run setup</Link></div>
       )}
       <Routes>
-        <Route path='/' element={<Newsstand />} />
+        <Route path='/' element={<Newsstand status={status} />} />
         <Route path='/publication/:id' element={<PublicationDetail />} />
         <Route path='/read/:id/:pageNumber' element={<Reader status={status} />} />
         <Route path='/author' element={<Author status={status} />} />
         <Route path='/author/read/:id/:pageNumber' element={<AuthorPreview />} />
-        <Route path='/admin' element={<Admin />} />
+        <Route path='/admin' element={<Admin status={status} refreshStatus={refresh} />} />
         <Route path='/admin/read/:id/:pageNumber' element={<AuthorPreview />} />
         <Route path='/setup' element={<Setup status={status} refresh={refresh} />} />
         <Route path='/about' element={<About status={status} />} />
