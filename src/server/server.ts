@@ -350,13 +350,18 @@ function publicPublicationFields (row: any): Record<string, unknown> {
 }
 
 function publicPublicationMetaFields (row: any): PublicPublicationMeta {
+  const publishedAt = row.published_at == null
+    ? null
+    : row.published_at instanceof Date
+      ? row.published_at.toISOString()
+      : String(row.published_at)
   return {
     id: String(row.id),
     title: String(row.title),
     description: row.description,
     authorName: row.display_name,
     pageCount: Number(row.page_count),
-    publishedAt: row.published_at,
+    publishedAt,
     coverUrl: `${ROUTING_PREFIX}/publications/${String(row.id)}/cover`
   }
 }
