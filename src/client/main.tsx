@@ -5,7 +5,7 @@ import { AuthFetch, WalletClient } from '@bsv/sdk'
 import { BookOpen, Check, ExternalLink, FileText, Home, Library, MessageCircle, Monitor, RefreshCw, Settings, Smartphone, Upload, User } from 'lucide-react'
 import './styles.css'
 
-type WalletSubstrate = 'auto' | 'json-api' | 'secure-json-api' | 'Cicada' | 'XDM' | 'window.CWI'
+type WalletSubstrate = 'auto' | 'json-api' | 'secure-json-api' | 'react-native' | 'Cicada' | 'XDM' | 'window.CWI'
 
 interface Status {
   setupComplete: boolean
@@ -40,7 +40,7 @@ interface AuthorProfile {
 
 const API = '/api'
 const WALLET_ORIGINATOR = (import.meta as any).env?.VITE_WALLET_ORIGINATOR ?? window.location.hostname
-const WALLET_SUBSTRATE = ((import.meta as any).env?.VITE_WALLET_SUBSTRATE ?? 'json-api') as WalletSubstrate
+const WALLET_SUBSTRATE_OVERRIDE = (import.meta as any).env?.VITE_WALLET_SUBSTRATE as string | undefined
 const USERCOM_SOURCE = 'papertrade'
 const USERCOM_SUBMIT_ENDPOINT = 'https://usercom.babbage.systems/submit'
 const USERCOM_SIGNAL_ENDPOINT = 'https://usercom.babbage.systems/signal'
@@ -60,7 +60,26 @@ interface WalletOption {
 }
 
 function getWallet (): WalletClient {
-  return new WalletClient(WALLET_SUBSTRATE, WALLET_ORIGINATOR)
+  return new WalletClient(getWalletSubstrate(), WALLET_ORIGINATOR)
+}
+
+function hasReactNativeWalletBridge (): boolean {
+  const maybeWindow = window as Window & { ReactNativeWebView?: { postMessage?: unknown } }
+  return typeof maybeWindow.ReactNativeWebView?.postMessage === 'function'
+}
+
+function hasWindowCwiWalletBridge (): boolean {
+  return typeof (window as Window & { CWI?: unknown }).CWI === 'object'
+}
+
+function hasEmbeddedWalletBridge (): boolean {
+  return hasReactNativeWalletBridge() || hasWindowCwiWalletBridge()
+}
+
+function getWalletSubstrate (): WalletSubstrate {
+  if (WALLET_SUBSTRATE_OVERRIDE != null && WALLET_SUBSTRATE_OVERRIDE !== '') return WALLET_SUBSTRATE_OVERRIDE as WalletSubstrate
+  if (hasReactNativeWalletBridge()) return 'react-native'
+  return 'auto'
 }
 
 function absoluteRequestUrl (url: string): string {
@@ -201,8 +220,13 @@ function normalizeWalletTransportError (err: unknown): Error {
     lower.includes('failed to fetch') ||
     lower.includes('networkerror') ||
     lower.includes('communication substrate') ||
-    lower.includes('wallet')
+    lower.includes('no wallet available') ||
+    lower.includes('reactnativewebview property') ||
+    lower.includes('window.cwi')
   if (!isTransportFailure) return err instanceof Error ? err : new Error(raw === '' ? 'Wallet request failed' : raw)
+  if (hasEmbeddedWalletBridge()) {
+    return new Error('Wallet connection needs attention. PaperTrade is open in a wallet browser, but the wallet request did not complete. Sign in, approve any pending wallet prompts, and retry.')
+  }
   return new Error('BRC100 wallet setup is needed to continue. Open PaperTrade in Metanet Explorer, BSV Browser, or another compatible BRC100 wallet browser.')
 }
 
@@ -241,7 +265,11 @@ function friendlyErrorMessage (err: unknown, fallback: string): string {
 
 function isWalletHelpMessage (message: string): boolean {
   const lower = message.toLowerCase()
-  return lower.includes('wallet') ||
+  return lower.includes('wallet connection needs attention') ||
+    lower.includes('wallet request timed out') ||
+    lower.includes('wallet setup is needed') ||
+    lower.includes('no wallet available') ||
+    lower.includes('communication substrate') ||
     lower.includes('brc100') ||
     lower.includes('payment') ||
     lower.includes('auth') ||
@@ -295,25 +323,32 @@ function platformWalletOptions (): WalletOption[] {
 function WalletHelp ({ message, freePageUrl }: { message: string, freePageUrl?: string }): JSX.Element | null {
   if (!isWalletHelpMessage(message)) return null
   const options = platformWalletOptions()
+  const hasWallet = hasEmbeddedWalletBridge()
   return (
     <section className='wallet-help'>
       <div className='wallet-help-copy'>
-        <span className='step-label'>Wallet needed</span>
-        <h2>Continue with a BRC100 wallet</h2>
-        <p>You have reached a wallet-protected step. Install a compatible wallet browser, open PaperTrade there, and return to this page to continue.</p>
+        <span className='step-label'>{hasWallet ? 'Wallet connected' : 'Wallet needed'}</span>
+        <h2>{hasWallet ? 'Approve this wallet request' : 'Continue with a BRC100 wallet'}</h2>
+        <p>
+          {hasWallet
+            ? 'PaperTrade is open in a compatible wallet browser. Sign in if needed, approve any pending wallet prompt, then retry this page.'
+            : 'You have reached a wallet-protected step. Install a compatible wallet browser, open PaperTrade there, and return to this page to continue.'}
+        </p>
       </div>
-      <div className='wallet-options'>
-        {options.map(option => (
-          <a className='wallet-option' href={option.href} target='_blank' rel='noreferrer' key={option.label}>
-            {option.icon === 'phone' ? <Smartphone size={20} /> : <Monitor size={20} />}
-            <span>
-              <strong>{option.label}</strong>
-              <small>{option.description}</small>
-            </span>
-            <ExternalLink size={16} />
-          </a>
-        ))}
-      </div>
+      {!hasWallet && (
+        <div className='wallet-options'>
+          {options.map(option => (
+            <a className='wallet-option' href={option.href} target='_blank' rel='noreferrer' key={option.label}>
+              {option.icon === 'phone' ? <Smartphone size={20} /> : <Monitor size={20} />}
+              <span>
+                <strong>{option.label}</strong>
+                <small>{option.description}</small>
+              </span>
+              <ExternalLink size={16} />
+            </a>
+          ))}
+        </div>
+      )}
       <div className='wallet-actions'>
         {freePageUrl != null && <Link className='button secondary' to={freePageUrl}><BookOpen size={18} /> Read page 1 free</Link>}
         <button type='button' onClick={() => window.location.reload()}><RefreshCw size={18} /> Retry</button>
