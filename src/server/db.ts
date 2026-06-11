@@ -23,6 +23,7 @@ export interface ServerSettings {
   mode: 'private_publish' | 'public_submissions'
   price_per_page_sats: number
   commission_bps: number
+  display_unit: 'sats' | 'usd_cents'
   wallet_storage_url: string
   server_public_key: string | null
   server_key_status: string

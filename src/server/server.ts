@@ -6,7 +6,7 @@ import multer from 'multer'
 import path from 'path'
 import fs from 'fs/promises'
 import { fileURLToPath } from 'url'
-import { randomUUID } from 'crypto'
+import { createHash, randomUUID } from 'crypto'
 import { P2PKH } from '@bsv/sdk'
 import { createAuthMiddleware } from '@bsv/auth-express-middleware'
 import { createPaymentMiddleware } from '@bsv/payment-express-middleware'
@@ -20,10 +20,19 @@ const HTTP_PORT = Number(process.env.HTTP_PORT ?? process.env.PORT ?? '3001')
 const ROUTING_PREFIX = process.env.ROUTING_PREFIX ?? '/api'
 const DATA_DIR = process.env.DATA_DIR ?? '/data/papertrade'
 const upload = multer({ dest: path.join(DATA_DIR, 'tmp'), limits: { fileSize: 250 * 1024 * 1024 } })
+const JSON_BODY_LIMIT = process.env.JSON_BODY_LIMIT ?? '80mb'
+const MAX_JSON_UPLOAD_BYTES = 40 * 1024 * 1024
+const MAX_AVATAR_BYTES = 5 * 1024 * 1024
 
 interface AuthenticatedRequest extends Request {
   auth?: { identityKey: string }
   payment?: { satoshisPaid: number, accepted?: boolean, tx?: string }
+}
+
+interface JsonUploadBody {
+  fileName?: unknown
+  mimeType?: unknown
+  dataBase64?: unknown
 }
 
 function identityKeyOf (req: Request): string | undefined {
@@ -60,6 +69,49 @@ async function ensureAuthor (identityKey: string, displayName?: string): Promise
       display_name: displayName?.trim() !== '' && displayName?.trim() != null ? displayName.trim() : `Author ${identityKey.slice(0, 10)}`
     })
   }
+}
+
+function displayUnitFromBody (value: unknown, fallback = 'sats'): 'sats' | 'usd_cents' {
+  return value === 'usd_cents' ? 'usd_cents' : fallback === 'usd_cents' ? 'usd_cents' : 'sats'
+}
+
+function defaultAuthorProfile (identityKey: string): Record<string, unknown> {
+  return {
+    identity_key: identityKey,
+    display_name: `Author ${identityKey.slice(0, 10)}`,
+    bio: '',
+    avatar_url: null,
+    display_unit: null
+  }
+}
+
+function safeOriginalName (name: string): string {
+  const base = path.basename(name).replace(/[^a-zA-Z0-9._ -]/g, '_').trim()
+  return base === '' ? 'upload.bin' : base
+}
+
+function decodeJsonUpload (body: JsonUploadBody, maxBytes: number): { originalName: string, mimeType: string, bytes: Buffer } {
+  const originalName = safeOriginalName(typeof body.fileName === 'string' ? body.fileName : 'upload.bin')
+  const mimeType = typeof body.mimeType === 'string' && body.mimeType.trim() !== '' ? body.mimeType.trim() : 'application/octet-stream'
+  if (typeof body.dataBase64 !== 'string' || body.dataBase64 === '') {
+    throw new Error('dataBase64 is required')
+  }
+  const bytes = Buffer.from(body.dataBase64, 'base64')
+  if (bytes.length === 0) throw new Error('Uploaded file is empty')
+  if (bytes.length > maxBytes) throw new Error(`Uploaded file exceeds ${Math.floor(maxBytes / 1024 / 1024)} MB`)
+  return { originalName, mimeType, bytes }
+}
+
+async function writeTempUpload (uploadBody: { originalName: string, bytes: Buffer }): Promise<string> {
+  await fs.mkdir(path.join(DATA_DIR, 'tmp'), { recursive: true })
+  const tempPath = path.join(DATA_DIR, 'tmp', `${randomUUID()}-${uploadBody.originalName}`)
+  await fs.writeFile(tempPath, uploadBody.bytes)
+  return tempPath
+}
+
+async function canUseAuthorTools (identityKey: string): Promise<boolean> {
+  const settings = await getSettings()
+  return settings.mode === 'public_submissions' || await isAdmin(identityKey)
 }
 
 async function hasValidEntitlement (publicationId: string, pageNumber: number, readerIdentityKey?: string): Promise<boolean> {
@@ -193,6 +245,63 @@ function publicPublicationFields (row: any): Record<string, unknown> {
   }
 }
 
+async function processAndStorePublicationUpload (
+  publication: any,
+  actor: string | undefined,
+  tempPath: string,
+  originalName: string,
+  mimeType: string
+): Promise<{ pageCount: number }> {
+  try {
+    const processed = await processPublicationFile(publication.id, tempPath, originalName)
+    await db.transaction(async trx => {
+      await trx('publication_files').where({ publication_id: publication.id }).delete()
+      await trx('publication_pages').where({ publication_id: publication.id }).delete()
+      await trx('publication_files').insert([
+        {
+          id: randomUUID(),
+          publication_id: publication.id,
+          kind: 'source',
+          original_filename: originalName,
+          mime_type: mimeType,
+          path: processed.sourcePath,
+          sha256: processed.sourceSha256,
+          bytes: processed.sourceBytes
+        },
+        {
+          id: randomUUID(),
+          publication_id: publication.id,
+          kind: 'canonical_pdf',
+          original_filename: 'canonical.pdf',
+          mime_type: 'application/pdf',
+          path: processed.canonicalPdfPath,
+          sha256: processed.canonicalSha256,
+          bytes: processed.canonicalBytes
+        }
+      ])
+      await trx('publication_pages').insert(processed.pages.map(page => ({
+        publication_id: publication.id,
+        page_number: page.pageNumber,
+        image_path: page.imagePath,
+        sha256: page.sha256,
+        bytes: page.bytes
+      })))
+      await trx('publications').where({ id: publication.id }).update({
+        page_count: processed.pageCount,
+        canonical_pdf_path: processed.canonicalPdfPath,
+        cover_page_path: processed.pages[0]?.imagePath,
+        source_format: path.extname(originalName).replace('.', '').toLowerCase(),
+        updated_at: trx.fn.now()
+      })
+      await writeAudit('publication_file_processed', actor, 'publication', publication.id, { pageCount: processed.pageCount }, trx)
+    })
+    return { pageCount: processed.pageCount }
+  } catch (err) {
+    await fs.rm(tempPath, { force: true })
+    throw err
+  }
+}
+
 async function createApp (): Promise<express.Express> {
   await fs.mkdir(DATA_DIR, { recursive: true })
   await db.migrate.latest()
@@ -200,7 +309,7 @@ async function createApp (): Promise<express.Express> {
 
   const app = express()
   app.disable('x-powered-by')
-  app.use(bodyParser.json({ limit: '10mb' }))
+  app.use(bodyParser.json({ limit: JSON_BODY_LIMIT }))
   app.use((req, res, next) => {
     res.header('Access-Control-Allow-Origin', '*')
     res.header('Access-Control-Allow-Headers', '*')
@@ -244,6 +353,7 @@ async function createApp (): Promise<express.Express> {
       mode: settings.mode,
       pricePerPageSats: Number(settings.price_per_page_sats),
       commissionBps: Number(settings.commission_bps),
+      displayUnit: settings.display_unit ?? 'sats',
       walletStorageUrl: settings.wallet_storage_url,
       serverPublicKey: settings.server_public_key,
       serverKeyStatus: settings.server_key_status,
@@ -258,6 +368,7 @@ async function createApp (): Promise<express.Express> {
     const pricePerPageSats = asPositiveInteger(req.body.pricePerPageSats, 25)
     const commissionBps = asPositiveInteger(req.body.commissionBps, 1000)
     const mode = req.body.mode === 'public_submissions' ? 'public_submissions' : 'private_publish'
+    const displayUnit = displayUnitFromBody(req.body.displayUnit)
     const walletStorageUrl = typeof req.body.walletStorageUrl === 'string' && req.body.walletStorageUrl.trim() !== ''
       ? req.body.walletStorageUrl.trim()
       : 'https://storage.babbage.systems'
@@ -282,13 +393,19 @@ async function createApp (): Promise<express.Express> {
         mode,
         price_per_page_sats: pricePerPageSats,
         commission_bps: commissionBps,
+        display_unit: displayUnit,
         wallet_storage_url: walletStorageUrl
       })
       await trx('admins').insert({ identity_key: actor, added_by: actor }).onConflict('identity_key').ignore()
+      await trx('authors').insert({
+        identity_key: actor,
+        display_name: `Author ${actor.slice(0, 10)}`
+      }).onConflict('identity_key').ignore()
       await writeAudit(alreadySetup ? 'setup_updated' : 'setup_completed', actor, 'server_settings', '1', {
         mode,
         pricePerPageSats,
         commissionBps,
+        displayUnit,
         walletStorageUrl
       }, trx)
     })
@@ -333,8 +450,15 @@ async function createApp (): Promise<express.Express> {
 
   api.get('/me/profile', requireAuth, async (req, res) => {
     const identityKey = identityKeyOf(req)
+    if (identityKey == null) throw new Error('auth middleware invariant failed')
     const profile = await db('authors').where({ identity_key: identityKey }).first()
-    res.json({ status: 'success', profile })
+    const settings = await getSettings()
+    res.json({
+      status: 'success',
+      profile: profile ?? defaultAuthorProfile(identityKey),
+      effectiveDisplayUnit: profile?.display_unit ?? settings.display_unit ?? 'sats',
+      canPublish: await canUseAuthorTools(identityKey)
+    })
   })
 
   api.put('/me/profile', requireAuth, async (req, res) => {
@@ -349,15 +473,137 @@ async function createApp (): Promise<express.Express> {
       identity_key: identityKey,
       display_name: displayName,
       bio: req.body.bio ?? null,
-      avatar_url: req.body.avatarUrl ?? null
+      avatar_url: req.body.avatarUrl ?? null,
+      display_unit: req.body.displayUnit === 'server_default' ? null : displayUnitFromBody(req.body.displayUnit)
     }).onConflict('identity_key').merge({
       display_name: displayName,
       bio: req.body.bio ?? null,
       avatar_url: req.body.avatarUrl ?? null,
+      display_unit: req.body.displayUnit === 'server_default' ? null : displayUnitFromBody(req.body.displayUnit),
       updated_at: db.fn.now()
     })
     await writeAudit('author_profile_updated', identityKey, 'author', identityKey)
     res.json({ status: 'success' })
+  })
+
+  api.post('/me/profile/avatar', requireAuth, async (req, res) => {
+    const identityKey = identityKeyOf(req)
+    if (identityKey == null) throw new Error('auth middleware invariant failed')
+    const uploaded = decodeJsonUpload(req.body as JsonUploadBody, MAX_AVATAR_BYTES)
+    if (!['image/png', 'image/jpeg', 'image/webp', 'image/gif'].includes(uploaded.mimeType)) {
+      res.status(400).json({ status: 'error', message: 'Avatar must be PNG, JPEG, WebP, or GIF' })
+      return
+    }
+    const extByMime: Record<string, string> = {
+      'image/png': '.png',
+      'image/jpeg': '.jpg',
+      'image/webp': '.webp',
+      'image/gif': '.gif'
+    }
+    const avatarDir = path.join(DATA_DIR, 'avatars')
+    await fs.mkdir(avatarDir, { recursive: true })
+    const avatarId = createHash('sha256').update(identityKey).digest('hex')
+    const avatarPath = path.join(avatarDir, `${avatarId}${extByMime[uploaded.mimeType]}`)
+    await fs.writeFile(avatarPath, uploaded.bytes)
+    await ensureAuthor(identityKey)
+    const avatarUrl = `${ROUTING_PREFIX}/authors/${encodeURIComponent(identityKey)}/avatar`
+    await db('authors').where({ identity_key: identityKey }).update({
+      avatar_url: avatarUrl,
+      updated_at: db.fn.now()
+    })
+    await writeAudit('author_avatar_updated', identityKey, 'author', identityKey)
+    res.json({ status: 'success', avatarUrl })
+  })
+
+  api.get('/authors/:identityKey/avatar', async (req, res) => {
+    const profile = await db('authors').where({ identity_key: req.params.identityKey }).first()
+    if (profile?.avatar_url == null) {
+      res.status(404).json({ status: 'error', message: 'Avatar not found' })
+      return
+    }
+    const avatarId = createHash('sha256').update(req.params.identityKey).digest('hex')
+    const avatarDir = path.join(DATA_DIR, 'avatars')
+    const candidates = ['.png', '.jpg', '.webp', '.gif'].map(ext => path.join(avatarDir, `${avatarId}${ext}`))
+    for (const candidate of candidates) {
+      try {
+        await fs.access(candidate)
+        res.sendFile(candidate)
+        return
+      } catch {}
+    }
+    res.status(404).json({ status: 'error', message: 'Avatar not found' })
+  })
+
+  api.get('/me/publications', requireAuth, async (req, res) => {
+    const identityKey = identityKeyOf(req)
+    if (identityKey == null) throw new Error('auth middleware invariant failed')
+    const rows = await db('publications')
+      .where({ author_identity_key: identityKey })
+      .orderBy('updated_at', 'desc')
+    res.json({
+      status: 'success',
+      canPublish: await canUseAuthorTools(identityKey),
+      publications: rows
+    })
+  })
+
+  api.post('/me/publications', requireAuth, async (req, res) => {
+    const identityKey = identityKeyOf(req)
+    if (identityKey == null) throw new Error('auth middleware invariant failed')
+    if (!(await canUseAuthorTools(identityKey))) {
+      res.status(403).json({ status: 'error', message: 'This server is private. Only admins can create publications right now.' })
+      return
+    }
+    const title = String(req.body.title ?? '').trim()
+    if (title === '') {
+      res.status(400).json({ status: 'error', message: 'title is required' })
+      return
+    }
+    await ensureAuthor(identityKey)
+    const id = randomUUID()
+    await db('publications').insert({
+      id,
+      author_identity_key: identityKey,
+      title,
+      description: req.body.description ?? null,
+      status: 'draft'
+    })
+    await writeAudit('publication_created', identityKey, 'publication', id)
+    res.json({ status: 'success', publicationId: id })
+  })
+
+  api.post('/me/publications/:id/files', requireAuth, async (req, res) => {
+    const identityKey = identityKeyOf(req)
+    if (identityKey == null) throw new Error('auth middleware invariant failed')
+    const publication = await db('publications').where({ id: req.params.id, author_identity_key: identityKey }).first()
+    if (publication == null) {
+      res.status(404).json({ status: 'error', message: 'Publication not found' })
+      return
+    }
+    const uploaded = decodeJsonUpload(req.body as JsonUploadBody, MAX_JSON_UPLOAD_BYTES)
+    const tempPath = await writeTempUpload(uploaded)
+    const processed = await processAndStorePublicationUpload(publication, identityKey, tempPath, uploaded.originalName, uploaded.mimeType)
+    res.json({ status: 'success', pageCount: processed.pageCount })
+  })
+
+  api.post('/me/publications/:id/submit', requireAuth, async (req, res) => {
+    const identityKey = identityKeyOf(req)
+    if (identityKey == null) throw new Error('auth middleware invariant failed')
+    const publication = await db('publications').where({ id: req.params.id, author_identity_key: identityKey }).first()
+    if (publication == null || Number(publication.page_count) < 5) {
+      res.status(400).json({ status: 'error', message: 'Publication needs a processed file with at least 5 pages' })
+      return
+    }
+    const settings = await getSettings()
+    const nextStatus = settings.mode === 'private_publish' && await isAdmin(identityKey) ? 'published' : 'submitted'
+    await db('publications').where({ id: req.params.id }).update({
+      status: nextStatus,
+      reviewed_by: nextStatus === 'published' ? identityKey : null,
+      published_at: nextStatus === 'published' ? db.fn.now() : null,
+      updated_at: db.fn.now()
+    })
+    await writeAudit(nextStatus === 'published' ? 'publication_published' : 'publication_submitted', identityKey, 'publication', req.params.id)
+    res.json({ status: 'success', statusValue: nextStatus })
   })
 
   api.get('/admin/publications', requireAdmin, async (_req, res) => {
@@ -397,58 +643,23 @@ async function createApp (): Promise<express.Express> {
       res.status(404).json({ status: 'error', message: 'Publication not found' })
       return
     }
+    let uploadInput
     if (req.file == null) {
-      res.status(400).json({ status: 'error', message: 'file is required' })
-      return
+      const uploaded = decodeJsonUpload(req.body as JsonUploadBody, MAX_JSON_UPLOAD_BYTES)
+      uploadInput = {
+        tempPath: await writeTempUpload(uploaded),
+        originalName: uploaded.originalName,
+        mimeType: uploaded.mimeType
+      }
+    } else {
+      uploadInput = {
+        tempPath: req.file.path,
+        originalName: req.file.originalname,
+        mimeType: req.file.mimetype
+      }
     }
-    try {
-      const processed = await processPublicationFile(publication.id, req.file.path, req.file.originalname)
-      await db.transaction(async trx => {
-        await trx('publication_files').where({ publication_id: publication.id }).delete()
-        await trx('publication_pages').where({ publication_id: publication.id }).delete()
-        await trx('publication_files').insert([
-          {
-            id: randomUUID(),
-            publication_id: publication.id,
-            kind: 'source',
-            original_filename: req.file?.originalname,
-            mime_type: req.file?.mimetype,
-            path: processed.sourcePath,
-            sha256: processed.sourceSha256,
-            bytes: processed.sourceBytes
-          },
-          {
-            id: randomUUID(),
-            publication_id: publication.id,
-            kind: 'canonical_pdf',
-            original_filename: 'canonical.pdf',
-            mime_type: 'application/pdf',
-            path: processed.canonicalPdfPath,
-            sha256: processed.canonicalSha256,
-            bytes: processed.canonicalBytes
-          }
-        ])
-        await trx('publication_pages').insert(processed.pages.map(page => ({
-          publication_id: publication.id,
-          page_number: page.pageNumber,
-          image_path: page.imagePath,
-          sha256: page.sha256,
-          bytes: page.bytes
-        })))
-        await trx('publications').where({ id: publication.id }).update({
-          page_count: processed.pageCount,
-          canonical_pdf_path: processed.canonicalPdfPath,
-          cover_page_path: processed.pages[0]?.imagePath,
-          source_format: path.extname(req.file?.originalname ?? '').replace('.', '').toLowerCase(),
-          updated_at: trx.fn.now()
-        })
-        await writeAudit('publication_file_processed', actor, 'publication', publication.id, { pageCount: processed.pageCount }, trx)
-      })
-      res.json({ status: 'success', pageCount: processed.pageCount })
-    } catch (err) {
-      await fs.rm(req.file.path, { force: true })
-      throw err
-    }
+    const processed = await processAndStorePublicationUpload(publication, actor, uploadInput.tempPath, uploadInput.originalName, uploadInput.mimeType)
+    res.json({ status: 'success', pageCount: processed.pageCount })
   })
 
   api.post('/admin/publications/:id/submit', requireAdmin, async (req, res) => {
@@ -487,6 +698,7 @@ async function createApp (): Promise<express.Express> {
       mode: req.body.mode === 'public_submissions' ? 'public_submissions' : 'private_publish',
       price_per_page_sats: asPositiveInteger(req.body.pricePerPageSats, 25),
       commission_bps: asPositiveInteger(req.body.commissionBps, 1000),
+      display_unit: displayUnitFromBody(req.body.displayUnit),
       wallet_storage_url: String(req.body.walletStorageUrl ?? 'https://storage.babbage.systems')
     }
     if (settings.commission_bps > 10000) {

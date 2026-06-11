@@ -9,8 +9,10 @@ interface Status {
   setupComplete: boolean
   identityKey?: string
   isAdmin: boolean
+  mode: 'private_publish' | 'public_submissions'
   pricePerPageSats: number
   commissionBps: number
+  displayUnit: 'sats' | 'usd_cents'
   walletStorageUrl: string
   serverPublicKey?: string
 }
@@ -23,6 +25,14 @@ interface Publication {
   authorIdentityKey: string
   pageCount: number
   publishedAt?: string
+}
+
+interface AuthorProfile {
+  identity_key: string
+  display_name: string
+  bio?: string | null
+  avatar_url?: string | null
+  display_unit?: 'sats' | 'usd_cents' | null
 }
 
 const API = '/api'
@@ -44,6 +54,34 @@ function randomBase64 (length: number): string {
   const bytes = new Uint8Array(length)
   crypto.getRandomValues(bytes)
   return btoa(String.fromCharCode(...bytes))
+}
+
+async function fileToBase64 (file: File): Promise<string> {
+  return await new Promise((resolve, reject) => {
+    const reader = new FileReader()
+    reader.onerror = () => reject(new Error('Could not read file'))
+    reader.onload = () => {
+      const result = typeof reader.result === 'string' ? reader.result : ''
+      resolve(result.includes(',') ? result.split(',')[1] : result)
+    }
+    reader.readAsDataURL(file)
+  })
+}
+
+async function uploadJsonFile (url: string, file: File): Promise<Response> {
+  return await authFetch(url, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({
+      fileName: file.name,
+      mimeType: file.type === '' ? 'application/octet-stream' : file.type,
+      dataBase64: await fileToBase64(file)
+    })
+  })
+}
+
+function paymentUnitLabel (unit: 'sats' | 'usd_cents'): string {
+  return unit === 'usd_cents' ? 'USD cents' : 'sats'
 }
 
 async function authFetch (url: string, init?: RequestInit): Promise<Response> {
@@ -228,8 +266,9 @@ function Setup ({ status, refresh }: { status: Status | null, refresh: () => Pro
   const [form, setForm] = useState({
     pricePerPageSats: status?.pricePerPageSats ?? 25,
     commissionBps: status?.commissionBps ?? 1000,
+    displayUnit: status?.displayUnit ?? 'sats',
     walletStorageUrl: status?.walletStorageUrl ?? 'https://storage.babbage.systems',
-    mode: 'private_publish',
+    mode: status?.mode ?? 'private_publish',
     serverPrivateKey: ''
   })
   const [message, setMessage] = useState('')
@@ -239,6 +278,8 @@ function Setup ({ status, refresh }: { status: Status | null, refresh: () => Pro
         ...f,
         pricePerPageSats: status.pricePerPageSats,
         commissionBps: status.commissionBps,
+        displayUnit: status.displayUnit,
+        mode: status.mode,
         walletStorageUrl: status.walletStorageUrl
       }))
     }
@@ -255,48 +296,184 @@ function Setup ({ status, refresh }: { status: Status | null, refresh: () => Pro
     setMessage('Setup saved.')
   }
   return (
-    <section className='surface narrow'>
-      <header className='page-head'><h1>First-run setup</h1></header>
-      <label>Price per page <input type='number' value={form.pricePerPageSats} onChange={e => setForm({ ...form, pricePerPageSats: Number(e.target.value) })} /></label>
-      <label>Commission bps <input type='number' value={form.commissionBps} onChange={e => setForm({ ...form, commissionBps: Number(e.target.value) })} /></label>
-      <label>Wallet Storage URL <input value={form.walletStorageUrl} onChange={e => setForm({ ...form, walletStorageUrl: e.target.value })} /></label>
-      <label>Server private key <input value={form.serverPrivateKey} onChange={e => setForm({ ...form, serverPrivateKey: e.target.value })} placeholder='Optional replacement key' /></label>
-      <button className='button' type='button' onClick={() => { void submit().catch(err => setMessage(err.message)) }}><Check size={18} /> Save setup</button>
+    <section className='surface setup-flow'>
+      <header className='page-head'>
+        <div>
+          <h1>Server setup</h1>
+          <p>{status?.setupComplete === true ? 'Review and update how this PaperTrade server operates.' : 'Configure publishing, payments, and wallet storage before the first publication.'}</p>
+        </div>
+      </header>
+      <div className='wizard-grid'>
+        <section className='tool-panel'>
+          <span className='step-label'>1 Publishing</span>
+          <div className='choice-grid'>
+            <button className={form.mode === 'private_publish' ? 'choice selected' : 'choice'} type='button' onClick={() => setForm({ ...form, mode: 'private_publish' })}>
+              <strong>Private server</strong>
+              <span>Only admins can create and publish works.</span>
+            </button>
+            <button className={form.mode === 'public_submissions' ? 'choice selected' : 'choice'} type='button' onClick={() => setForm({ ...form, mode: 'public_submissions' })}>
+              <strong>Public submissions</strong>
+              <span>Any authenticated author can submit for admin review.</span>
+            </button>
+          </div>
+        </section>
+        <section className='tool-panel'>
+          <span className='step-label'>2 Payments</span>
+          <label>Price per paid page, charged in sats <input type='number' min='0' value={form.pricePerPageSats} onChange={e => setForm({ ...form, pricePerPageSats: Number(e.target.value) })} /></label>
+          <label>Payment display unit for labels
+            <select value={form.displayUnit} onChange={e => setForm({ ...form, displayUnit: e.target.value as 'sats' | 'usd_cents' })}>
+              <option value='sats'>Satoshis</option>
+              <option value='usd_cents'>USD cents</option>
+            </select>
+          </label>
+          <label>Platform commission <input type='number' min='0' max='10000' value={form.commissionBps} onChange={e => setForm({ ...form, commissionBps: Number(e.target.value) })} /></label>
+          <p className='hint'>{form.commissionBps / 100}% platform share. Reader payments are still settled in BSV.</p>
+        </section>
+        <section className='tool-panel'>
+          <span className='step-label'>3 Wallet</span>
+          <label>Wallet Storage URL <input value={form.walletStorageUrl} onChange={e => setForm({ ...form, walletStorageUrl: e.target.value })} /></label>
+          <label>Server private key <input value={form.serverPrivateKey} onChange={e => setForm({ ...form, serverPrivateKey: e.target.value })} placeholder='Optional replacement key' /></label>
+          <p className='hint'>The first BRC100 identity to save setup becomes an admin.</p>
+        </section>
+      </div>
+      <button className='button primary-action' type='button' onClick={() => { void submit().catch(err => setMessage(err.message)) }}><Check size={18} /> Save setup</button>
       {message !== '' && <p>{message}</p>}
     </section>
   )
 }
 
-function Author (): JSX.Element {
-  const [profile, setProfile] = useState({ displayName: '', bio: '', avatarUrl: '' })
+function Author ({ status }: { status: Status | null }): JSX.Element {
+  const [profile, setProfile] = useState({ displayName: '', bio: '', displayUnit: 'server_default' })
+  const [avatarUrl, setAvatarUrl] = useState<string | null>(null)
+  const [avatarFile, setAvatarFile] = useState<File | null>(null)
+  const [canPublish, setCanPublish] = useState(false)
+  const [publications, setPublications] = useState<any[]>([])
+  const [title, setTitle] = useState('')
+  const [description, setDescription] = useState('')
+  const [selectedFile, setSelectedFile] = useState<File | null>(null)
   const [message, setMessage] = useState('')
+  const load = async (): Promise<void> => {
+    const [profileRes, publicationsRes] = await Promise.all([
+      authFetch(`${API}/me/profile`),
+      authFetch(`${API}/me/publications`)
+    ])
+    const profileJson: { profile?: AuthorProfile, canPublish?: boolean, message?: string } = await profileRes.json()
+    const publicationsJson = await publicationsRes.json()
+    if (!profileRes.ok) throw new Error(profileJson.message ?? 'Could not load profile')
+    const loaded = profileJson.profile
+    setProfile({
+      displayName: loaded?.display_name ?? '',
+      bio: loaded?.bio ?? '',
+      displayUnit: loaded?.display_unit ?? 'server_default'
+    })
+    setAvatarUrl(loaded?.avatar_url ?? null)
+    setCanPublish(Boolean(publicationsJson.canPublish ?? profileJson.canPublish))
+    setPublications(publicationsJson.publications ?? [])
+  }
+  useEffect(() => { void load().catch(err => setMessage(err instanceof Error ? err.message : 'Could not load author workspace')) }, [])
   const save = async (): Promise<void> => {
     const res = await authFetch(`${API}/me/profile`, {
       method: 'PUT',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify(profile)
+      body: JSON.stringify({
+        displayName: profile.displayName,
+        bio: profile.bio,
+        displayUnit: profile.displayUnit
+      })
     })
     const json = await res.json()
     if (!res.ok) throw new Error(json.message ?? 'Could not save profile')
+    if (avatarFile != null) {
+      const avatarRes = await uploadJsonFile(`${API}/me/profile/avatar`, avatarFile)
+      const avatarJson = await avatarRes.json()
+      if (!avatarRes.ok) throw new Error(avatarJson.message ?? 'Could not save avatar')
+      setAvatarUrl(avatarJson.avatarUrl)
+      setAvatarFile(null)
+    }
+    await load()
     setMessage('Profile saved.')
   }
+  const createAndUpload = async (): Promise<void> => {
+    const create = await authFetch(`${API}/me/publications`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ title, description })
+    })
+    const created: { publicationId?: string, message?: string } = await create.json()
+    if (!create.ok || created.publicationId == null) throw new Error(created.message ?? 'Could not create publication')
+    if (selectedFile != null) {
+      const upload = await uploadJsonFile(`${API}/me/publications/${created.publicationId}/files`, selectedFile)
+      const uploaded = await upload.json()
+      if (!upload.ok) throw new Error(uploaded.message ?? 'Could not process file')
+      const submit = await authFetch(`${API}/me/publications/${created.publicationId}/submit`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: '{}'
+      })
+      const submitted = await submit.json()
+      if (!submit.ok) throw new Error(submitted.message ?? 'Could not submit publication')
+      setMessage(submitted.statusValue === 'published' ? 'Publication uploaded and published.' : 'Publication uploaded and submitted for review.')
+    } else {
+      setMessage('Draft created. Add a file before submitting.')
+    }
+    setTitle('')
+    setDescription('')
+    setSelectedFile(null)
+    await load()
+  }
   return (
-    <section className='surface narrow'>
-      <header className='page-head'><h1>Author profile</h1></header>
-      <label>Display name <input value={profile.displayName} onChange={e => setProfile({ ...profile, displayName: e.target.value })} /></label>
-      <label>Bio <textarea value={profile.bio} onChange={e => setProfile({ ...profile, bio: e.target.value })} /></label>
-      <label>Avatar URL <input value={profile.avatarUrl} onChange={e => setProfile({ ...profile, avatarUrl: e.target.value })} /></label>
-      <button className='button' type='button' onClick={() => { void save().catch(err => setMessage(err.message)) }}><Check size={18} /> Save profile</button>
-      {message !== '' && <p>{message}</p>}
+    <section className='surface'>
+      <header className='page-head'>
+        <div>
+          <h1>Author</h1>
+          <p>Profile and publications are tied to your BRC100 identity key.</p>
+        </div>
+      </header>
+      <div className='admin-grid'>
+        <section className='tool-panel'>
+          <h2>Profile</h2>
+          <div className='avatar-row'>
+            {avatarUrl != null && <img src={avatarUrl} alt='' />}
+            <label>Avatar image <input type='file' accept='image/png,image/jpeg,image/webp,image/gif' onChange={e => setAvatarFile(e.target.files?.[0] ?? null)} /></label>
+          </div>
+          <label>Display name <input value={profile.displayName} onChange={e => setProfile({ ...profile, displayName: e.target.value })} /></label>
+          <label>Bio <textarea value={profile.bio} onChange={e => setProfile({ ...profile, bio: e.target.value })} /></label>
+          <label>Payment display unit
+            <select value={profile.displayUnit} onChange={e => setProfile({ ...profile, displayUnit: e.target.value })}>
+              <option value='server_default'>Use server default ({paymentUnitLabel(status?.displayUnit ?? 'sats')})</option>
+              <option value='sats'>Satoshis</option>
+              <option value='usd_cents'>USD cents</option>
+            </select>
+          </label>
+          <button className='button' type='button' onClick={() => { void save().catch(err => setMessage(err.message)) }}><Check size={18} /> Save profile</button>
+        </section>
+        <section className='tool-panel'>
+          <h2>New work</h2>
+          {!canPublish && <p className='empty'>This server is private. Only admins can create publications right now.</p>}
+          <form onSubmit={e => { e.preventDefault(); void createAndUpload().catch(err => setMessage(err.message)) }}>
+            <label>Title <input disabled={!canPublish} value={title} onChange={e => setTitle(e.target.value)} /></label>
+            <label>Description <textarea disabled={!canPublish} value={description} onChange={e => setDescription(e.target.value)} /></label>
+            <label>PDF, docx, or ePub <input disabled={!canPublish} type='file' accept='.pdf,.docx,.epub' onChange={e => setSelectedFile(e.target.files?.[0] ?? null)} /></label>
+            <button className='button' disabled={!canPublish} type='submit'><Upload size={18} /> Upload work</button>
+          </form>
+        </section>
+      </div>
+      {message !== '' && <p className='notice'>{message}</p>}
+      <section className='tool-panel publication-list'>
+        <h2>Your publications</h2>
+        {publications.map(pub => (
+          <div className='row' key={pub.id}>
+            <span>{pub.title}</span>
+            <span>{pub.status} · {pub.page_count} pages</span>
+          </div>
+        ))}
+        {publications.length === 0 && <p className='empty'>No drafts or publications yet.</p>}
+      </section>
     </section>
   )
 }
 
 function Admin (): JSX.Element {
-  const [title, setTitle] = useState('')
-  const [description, setDescription] = useState('')
-  const [authorDisplayName, setAuthorDisplayName] = useState('')
-  const [selectedFile, setSelectedFile] = useState<File | null>(null)
   const [message, setMessage] = useState('')
   const [publications, setPublications] = useState<any[]>([])
   const refresh = async (): Promise<void> => {
@@ -305,24 +482,6 @@ function Admin (): JSX.Element {
     setPublications(json.publications ?? [])
   }
   useEffect(() => { void refresh().catch(() => undefined) }, [])
-  const createAndUpload = async (): Promise<void> => {
-    const create = await authFetch(`${API}/admin/publications`, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ title, description, authorDisplayName })
-    })
-    const created: { publicationId?: string, message?: string } = await create.json()
-    if (!create.ok) throw new Error(created.message ?? 'Could not create publication')
-    if (selectedFile != null) {
-      const data = new FormData()
-      data.append('file', selectedFile)
-      const upload = await authFetch(`${API}/admin/publications/${String(created.publicationId)}/files`, { method: 'POST', body: data })
-      const uploaded = await upload.json()
-      if (!upload.ok) throw new Error(uploaded.message ?? 'Could not process file')
-    }
-    await refresh()
-    setMessage('Publication created.')
-  }
   const review = async (id: string, action: 'publish' | 'reject'): Promise<void> => {
     const res = await authFetch(`${API}/admin/publications/${id}/review`, {
       method: 'POST',
@@ -331,32 +490,31 @@ function Admin (): JSX.Element {
     })
     if (!res.ok) throw new Error('Review failed')
     await refresh()
+    setMessage(action === 'publish' ? 'Publication published.' : 'Publication rejected.')
   }
   return (
     <section className='surface'>
-      <header className='page-head'><h1>Admin</h1><Link className='button secondary' to='/setup'>Setup</Link></header>
-      <div className='admin-grid'>
-        <form className='tool-panel' onSubmit={e => { e.preventDefault(); void createAndUpload().catch(err => setMessage(err.message)) }}>
-          <h2>New publication</h2>
-          <label>Title <input value={title} onChange={e => setTitle(e.target.value)} /></label>
-          <label>Description <textarea value={description} onChange={e => setDescription(e.target.value)} /></label>
-          <label>Author display name <input value={authorDisplayName} onChange={e => setAuthorDisplayName(e.target.value)} /></label>
-          <label>PDF, docx, or ePub <input type='file' accept='.pdf,.docx,.epub' onChange={e => setSelectedFile(e.target.files?.[0] ?? null)} /></label>
-          <button className='button' type='submit'><Upload size={18} /> Create</button>
-          {message !== '' && <p>{message}</p>}
-        </form>
-        <div className='tool-panel'>
-          <h2>Publications</h2>
-          {publications.map(pub => (
-            <div className='row' key={pub.id}>
-              <span>{pub.title}</span>
-              <span>{pub.status} · {pub.page_count} pages</span>
-              <button type='button' onClick={() => { void review(pub.id, 'publish') }}>Publish</button>
-              <button type='button' onClick={() => { void review(pub.id, 'reject') }}>Reject</button>
-            </div>
-          ))}
+      <header className='page-head'>
+        <div>
+          <h1>Admin</h1>
+          <p>Review submitted publications and manage server configuration.</p>
         </div>
-      </div>
+        <Link className='button secondary' to='/setup'>Server setup</Link>
+      </header>
+      <section className='tool-panel'>
+        <h2>Publication review</h2>
+        {publications.map(pub => (
+          <div className='row' key={pub.id}>
+            <span>{pub.title}</span>
+            <span>{pub.display_name ?? 'Unknown author'}</span>
+            <span>{pub.status} · {pub.page_count} pages</span>
+            <button type='button' onClick={() => { void review(pub.id, 'publish') }}>Publish</button>
+            <button type='button' onClick={() => { void review(pub.id, 'reject') }}>Reject</button>
+          </div>
+        ))}
+        {publications.length === 0 && <p className='empty'>No publications to review yet.</p>}
+      </section>
+      {message !== '' && <p className='notice'>{message}</p>}
     </section>
   )
 }
@@ -374,7 +532,7 @@ function App (): JSX.Element {
           <Route path='/' element={<Newsstand />} />
           <Route path='/publication/:id' element={<PublicationDetail />} />
           <Route path='/read/:id/:pageNumber' element={<Reader status={status} />} />
-          <Route path='/author' element={<Author />} />
+          <Route path='/author' element={<Author status={status} />} />
           <Route path='/admin' element={<Admin />} />
           <Route path='/setup' element={<Setup status={status} refresh={refresh} />} />
         </Routes>

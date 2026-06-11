@@ -36,6 +36,13 @@ button.secondary,
   background: #5c6570;
 }
 
+button:disabled,
+input:disabled,
+textarea:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
 input,
 textarea,
 select {
@@ -127,6 +134,10 @@ main {
 
 .surface.narrow {
   max-width: 720px;
+}
+
+.setup-flow {
+  max-width: 1040px;
 }
 
 .page-head {
@@ -222,6 +233,75 @@ h1 {
   grid-template-columns: minmax(320px, 420px) 1fr;
 }
 
+.wizard-grid {
+  display: grid;
+  gap: 18px;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.choice-grid {
+  display: grid;
+  gap: 10px;
+}
+
+.choice {
+  align-items: start;
+  background: #f8fafb;
+  border: 1px solid #d6dde2;
+  color: #20231f;
+  display: grid;
+  gap: 6px;
+  height: auto;
+  justify-items: start;
+  padding: 14px;
+  text-align: left;
+}
+
+.choice.selected {
+  background: #e7f0ed;
+  border-color: #1f4f46;
+  box-shadow: inset 0 0 0 1px #1f4f46;
+}
+
+.choice span,
+.hint {
+  color: #5c6570;
+  font-size: 13px;
+  font-weight: 500;
+}
+
+.step-label {
+  color: #8a5d20;
+  display: block;
+  font-size: 13px;
+  font-weight: 800;
+  margin-bottom: 14px;
+  text-transform: uppercase;
+}
+
+.primary-action {
+  margin-top: 18px;
+}
+
+.avatar-row {
+  align-items: end;
+  display: grid;
+  gap: 14px;
+  grid-template-columns: 82px 1fr;
+}
+
+.avatar-row img {
+  aspect-ratio: 1;
+  border: 1px solid #ddd8ca;
+  border-radius: 8px;
+  object-fit: cover;
+  width: 82px;
+}
+
+.publication-list {
+  margin-top: 18px;
+}
+
 .row {
   align-items: center;
   border-bottom: 1px solid #ece8dd;
@@ -229,7 +309,8 @@ h1 {
 }
 
 .setup-banner,
-.empty {
+.empty,
+.notice {
   background: #fff8d8;
   border: 1px solid #ead37b;
   border-radius: 8px;
@@ -256,6 +337,14 @@ h1 {
   }
 
   .admin-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .wizard-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .avatar-row {
     grid-template-columns: 1fr;
   }
 }

@@ -12,6 +12,7 @@ exports.up = async function up (knex) {
     table.enum('mode', ['private_publish', 'public_submissions']).notNullable().defaultTo('private_publish')
     table.integer('price_per_page_sats').unsigned().notNullable().defaultTo(25)
     table.integer('commission_bps').unsigned().notNullable().defaultTo(1000)
+    table.enum('display_unit', ['sats', 'usd_cents']).notNullable().defaultTo('sats')
     table.string('wallet_storage_url', 512).notNullable().defaultTo('https://storage.babbage.systems')
     table.string('server_public_key', 130)
     table.string('server_key_status', 64).notNullable().defaultTo('auto_generated')
@@ -26,6 +27,7 @@ exports.up = async function up (knex) {
       mode: 'private_publish',
       price_per_page_sats: 25,
       commission_bps: 1000,
+      display_unit: 'sats',
       wallet_storage_url: 'https://storage.babbage.systems',
       server_key_status: 'auto_generated'
     })
@@ -42,6 +44,7 @@ exports.up = async function up (knex) {
     table.string('display_name', 160).notNullable()
     table.text('bio')
     table.string('avatar_url', 512)
+    table.enum('display_unit', ['sats', 'usd_cents'])
     table.timestamps(true, true)
   })
 
