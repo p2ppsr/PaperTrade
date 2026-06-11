@@ -27,6 +27,7 @@ interface Publication {
   authorIdentityKey: string
   pageCount: number
   publishedAt?: string
+  coverUrl?: string
 }
 
 interface AuthorProfile {
@@ -303,7 +304,7 @@ function Shell ({ children, status }: { children: React.ReactNode, status: Statu
           <Link to='/admin'><Settings size={18} /> Admin</Link>
         </nav>
         <div className='status-line'>
-          <span>{status?.setupComplete === true ? 'Configured' : 'Setup required'}</span>
+          <span>{status?.setupComplete === true ? 'Live server' : 'Setup required'}</span>
           <span>{status?.isAdmin === true ? 'Admin' : status?.identityKey != null ? 'Reader' : 'Guest'}</span>
         </div>
       </aside>
@@ -333,14 +334,19 @@ function Newsstand (): JSX.Element {
       <div className='publication-grid'>
         {publications.map(pub => (
           <article className='publication' key={pub.id}>
-            <div className='pub-icon'><FileText /></div>
-            <h2>{pub.title}</h2>
-            <p>{pub.description}</p>
-            <footer>
-              <span>{pub.authorName ?? pub.authorIdentityKey.slice(0, 12)}</span>
-              <span>{pub.pageCount} pages</span>
-            </footer>
-            <Link className='button' to={`/publication/${pub.id}`}>Open</Link>
+            <Link className='publication-cover' to={`/publication/${pub.id}`} aria-label={`Open ${pub.title}`}>
+              <img src={pub.coverUrl ?? `${API}/publications/${pub.id}/cover`} alt='' loading='lazy' />
+              <span><FileText size={18} /> Preview</span>
+            </Link>
+            <div className='publication-body'>
+              <h2>{pub.title}</h2>
+              <p>{pub.description}</p>
+              <footer>
+                <span>{pub.authorName ?? pub.authorIdentityKey.slice(0, 12)}</span>
+                <span>{pub.pageCount} pages</span>
+              </footer>
+              <Link className='button' to={`/publication/${pub.id}`}>Open</Link>
+            </div>
           </article>
         ))}
         {publications.length === 0 && <p className='empty'>No publications are live yet.</p>}

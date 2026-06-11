@@ -14,6 +14,7 @@ import { db, getSettings, isAdmin, writeAudit } from './db.js'
 import { asPositiveInteger, splitCommission } from './money.js'
 import { createServerWallet, replacePersistedServerKey } from './wallet.js'
 import { getPublicationDir, processPublicationFile } from './content.js'
+import { STARTER_AUTHOR_IDENTITY_KEY, STARTER_AUTHOR_NAME, STARTER_WORKS, type StarterWork, writeStarterPdf } from './starterWorks.js'
 
 const serverDirname = path.dirname(fileURLToPath(import.meta.url))
 const HTTP_PORT = Number(process.env.HTTP_PORT ?? process.env.PORT ?? '3001')
@@ -88,6 +89,11 @@ function defaultAuthorProfile (identityKey: string): Record<string, unknown> {
 function safeOriginalName (name: string): string {
   const base = path.basename(name).replace(/[^a-zA-Z0-9._ -]/g, '_').trim()
   return base === '' ? 'upload.bin' : base
+}
+
+function safeStarterFileName (name: string): string {
+  const slug = name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 80)
+  return `${slug === '' ? 'starter-work' : slug}.pdf`
 }
 
 function decodeJsonUpload (body: JsonUploadBody, maxBytes: number): { originalName: string, mimeType: string, bytes: Buffer } {
@@ -271,7 +277,8 @@ function publicPublicationFields (row: any): Record<string, unknown> {
     authorIdentityKey: row.author_identity_key,
     authorName: row.display_name,
     pageCount: Number(row.page_count),
-    publishedAt: row.published_at
+    publishedAt: row.published_at,
+    coverUrl: `${ROUTING_PREFIX}/publications/${String(row.id)}/cover`
   }
 }
 
@@ -332,9 +339,124 @@ async function processAndStorePublicationUpload (
   }
 }
 
+async function removeSeedTestData (): Promise<void> {
+  const publications = await db('publications')
+    .where('title', 'like', 'test pub%')
+    .select('id')
+
+  if (publications.length === 0) return
+
+  const publicationIds = publications.map(row => String(row.id))
+  const payments = await db('payments').whereIn('publication_id', publicationIds).select('id')
+  const paymentIds = payments.map(row => String(row.id))
+
+  await db.transaction(async trx => {
+    if (paymentIds.length > 0) {
+      await trx('ledger_entries')
+        .where({ source_type: 'payment' })
+        .whereIn('source_id', paymentIds)
+        .delete()
+    }
+    await trx('publications').whereIn('id', publicationIds).delete()
+    await writeAudit('seed_test_data_removed', undefined, 'publication', publicationIds.join(','), { publicationCount: publicationIds.length }, trx)
+  })
+
+  await Promise.all(publicationIds.map(async publicationId => {
+    await fs.rm(getPublicationDir(publicationId), { recursive: true, force: true })
+  }))
+}
+
+async function starterNeedsProcessing (publicationId: string): Promise<boolean> {
+  const publication = await db('publications').where({ id: publicationId }).first()
+  if (publication == null || Number(publication.page_count) < 5 || publication.cover_page_path == null) return true
+
+  const page = await db('publication_pages').where({ publication_id: publicationId, page_number: 1 }).first()
+  if (page == null) return true
+
+  try {
+    await fs.access(String(page.image_path))
+    return false
+  } catch {
+    return true
+  }
+}
+
+async function seedStarterWork (work: StarterWork): Promise<boolean> {
+  await db('publications')
+    .insert({
+      id: work.id,
+      author_identity_key: STARTER_AUTHOR_IDENTITY_KEY,
+      title: work.title,
+      description: `${work.authorName}. ${work.description}`,
+      status: 'published',
+      reviewed_by: STARTER_AUTHOR_IDENTITY_KEY,
+      published_at: db.fn.now()
+    })
+    .onConflict('id')
+    .merge({
+      title: work.title,
+      description: `${work.authorName}. ${work.description}`,
+      status: 'published',
+      reviewed_by: STARTER_AUTHOR_IDENTITY_KEY,
+      published_at: db.fn.now(),
+      updated_at: db.fn.now()
+    })
+
+  if (!(await starterNeedsProcessing(work.id))) return false
+
+  const starterPdfPath = path.join(DATA_DIR, 'tmp', `${work.id}.pdf`)
+  await writeStarterPdf(work, starterPdfPath)
+  const publication = await db('publications').where({ id: work.id }).first()
+  await processAndStorePublicationUpload(publication, STARTER_AUTHOR_IDENTITY_KEY, starterPdfPath, safeStarterFileName(work.title), 'application/pdf')
+  await db('publications').where({ id: work.id }).update({
+    status: 'published',
+    reviewed_by: STARTER_AUTHOR_IDENTITY_KEY,
+    published_at: db.fn.now(),
+    updated_at: db.fn.now()
+  })
+  return true
+}
+
+async function seedStarterWorks (): Promise<void> {
+  if (process.env.PAPERTRADE_SEED_STARTER_WORKS === 'false') return
+
+  await removeSeedTestData()
+  await db('authors')
+    .insert({
+      identity_key: STARTER_AUTHOR_IDENTITY_KEY,
+      display_name: STARTER_AUTHOR_NAME,
+      bio: 'Royalty-free public-domain starter shelf for new PaperTrade servers.'
+    })
+    .onConflict('identity_key')
+    .merge({
+      display_name: STARTER_AUTHOR_NAME,
+      bio: 'Royalty-free public-domain starter shelf for new PaperTrade servers.',
+      updated_at: db.fn.now()
+    })
+
+  let processedCount = 0
+  for (const work of STARTER_WORKS) {
+    if (await seedStarterWork(work)) processedCount += 1
+  }
+  await writeAudit('starter_works_seeded', undefined, 'publication', 'starter-library', {
+    workCount: STARTER_WORKS.length,
+    processedCount
+  })
+}
+
 async function createApp (): Promise<express.Express> {
   await fs.mkdir(DATA_DIR, { recursive: true })
   await db.migrate.latest()
+  try {
+    await seedStarterWorks()
+  } catch (err) {
+    console.warn(JSON.stringify({
+      level: 'warn',
+      service: 'papertrade',
+      event: 'starter_seed_failed',
+      message: err instanceof Error ? err.message : 'Unknown starter seed error'
+    }))
+  }
   const walletBootstrap = await createServerWallet()
 
   const app = express()
@@ -484,6 +606,19 @@ async function createApp (): Promise<express.Express> {
       return
     }
     res.json({ status: 'success', publication: publicPublicationFields(row) })
+  })
+
+  api.get('/publications/:id/cover', async (req, res, next) => {
+    try {
+      const publication = await db('publications').where({ id: req.params.id, status: 'published' }).first()
+      if (publication == null) {
+        res.status(404).json({ status: 'error', message: 'Publication not found' })
+        return
+      }
+      await sendPublicationPageImage(publication, 1, req, res)
+    } catch (err) {
+      next(err)
+    }
   })
 
   api.get('/publications/:id/pages/:pageNumber', requireReaderForPaidPage, pagePaymentMiddleware, async (req, res, next) => {
