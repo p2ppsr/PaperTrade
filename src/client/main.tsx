@@ -257,7 +257,7 @@ async function sharePaperTrade ({ title, text, path }: { title: string, text: st
   return 'Link copied.'
 }
 
-async function authFetch (url: string, init?: RequestInit): Promise<Response> {
+async function authFetch (url: string, init?: RequestInit, action = 'complete this wallet request'): Promise<Response> {
   const request = async (): Promise<Response> => {
     const startedAt = performance.now()
     const requestUrl = absoluteRequestUrl(url)
@@ -292,7 +292,7 @@ async function authFetch (url: string, init?: RequestInit): Promise<Response> {
       throw normalized
     }
   }
-  const next = walletRequestQueue.then(request, request)
+  const next = walletRequestQueue.then(async () => await withWalletTimeout(request(), action), async () => await withWalletTimeout(request(), action))
   walletRequestQueue = next.then(() => undefined, () => undefined)
   return await next
 }
@@ -313,7 +313,7 @@ async function withWalletTimeout<T> (promise: Promise<T>, action: string): Promi
 }
 
 async function paidPageFetch (url: string): Promise<Response> {
-  return await withWalletTimeout(authFetch(url), 'pay for this page')
+  return await authFetch(url, undefined, 'pay for this page')
 }
 
 function withFormatJson (url: string): string {
@@ -926,18 +926,21 @@ function Reader ({ status }: { status: Status | null }): JSX.Element {
   const currentPage = Number(pageNumber)
   const [imageUrl, setImageUrl] = useState<string | null>(null)
   const [message, setMessage] = useState('Loading page...')
+  const [isLoading, setIsLoading] = useState(true)
   const navigate = useNavigate()
 
   useEffect(() => {
     let live = true
     setImageUrl(null)
     setMessage('Loading page...')
+    setIsLoading(true)
     void pageFetch(`${API}/publications/${id}/pages/${currentPage}`, currentPage)
       .then(async res => await responseToPngBlob(res, 'Page request failed', currentPage > 1))
       .then(blob => {
         if (!live) return
         setImageUrl(URL.createObjectURL(blob))
         setMessage('')
+        setIsLoading(false)
         postSignal('reader.page_loaded', usercomMetadata({
           surface: 'reader',
           tags: [currentPage === 1 ? 'page:first_free' : 'page:paid'],
@@ -948,17 +951,20 @@ function Reader ({ status }: { status: Status | null }): JSX.Element {
         if (!live) return
         const nextMessage = friendlyErrorMessage(err, 'Unable to load page')
         setMessage(nextMessage)
+        setIsLoading(false)
         postSignal('reader.page_failed', usercomMetadata({ surface: 'reader', tags: ['error'], context: { publicationId: id, pageNumber: currentPage, message: nextMessage } }))
       })
-    return () => { live = false }
+    return () => {
+      live = false
+    }
   }, [id, currentPage])
 
   return (
     <section className='reader'>
       <div className='reader-toolbar'>
-        <button type='button' onClick={() => navigate(`/read/${id}/${Math.max(1, currentPage - 1)}`)}>Previous</button>
+        <button type='button' disabled={isLoading} onClick={() => navigate(`/read/${id}/${Math.max(1, currentPage - 1)}`)}>Previous</button>
         <span>Page {currentPage}</span>
-        <button type='button' onClick={() => navigate(`/read/${id}/${currentPage + 1}`)}>Next</button>
+        <button type='button' disabled={isLoading} onClick={() => navigate(`/read/${id}/${currentPage + 1}`)}>Next</button>
       </div>
       {message !== '' && !isWalletHelpMessage(message) && <p className='empty'>{message}</p>}
       <WalletHelp message={message} freePageUrl={currentPage > 1 ? `/read/${id}/1` : undefined} />
@@ -982,7 +988,7 @@ function AuthorPreview (): JSX.Element {
     let live = true
     setImageUrl(null)
     setMessage('Loading preview...')
-    void authFetch(withFormatJson(`${API}/me/publications/${id}/pages/${currentPage}`))
+    void authFetch(withFormatJson(`${API}/me/publications/${id}/pages/${currentPage}`), undefined, 'load publication preview')
       .then(async res => await responseToPngBlob(res, 'Preview failed', true))
       .then(blob => {
         if (!live) return
@@ -1130,9 +1136,9 @@ function Author ({ status }: { status: Status | null }): JSX.Element {
   const [showPayoutSupport, setShowPayoutSupport] = useState(false)
   const load = async (): Promise<void> => {
     const [profileRes, publicationsRes, ledgerRes] = await Promise.all([
-      withWalletTimeout(authFetch(`${API}/me/profile`), 'load your author profile'),
-      withWalletTimeout(authFetch(`${API}/me/publications`), 'load your publications'),
-      withWalletTimeout(authFetch(`${API}/me/ledger`), 'load your author ledger')
+      authFetch(`${API}/me/profile`, undefined, 'load your author profile'),
+      authFetch(`${API}/me/publications`, undefined, 'load your publications'),
+      authFetch(`${API}/me/ledger`, undefined, 'load your author ledger')
     ])
     const profileJson: { profile?: AuthorProfile, canPublish?: boolean, message?: string } = await profileRes.json()
     const publicationsJson = await publicationsRes.json()
@@ -1408,11 +1414,11 @@ function Admin ({ status, refreshStatus }: { status: Status | null, refreshStatu
   })
   const refresh = async (): Promise<void> => {
     const [pubRes, ledgerRes, paymentRes, settingsRes, walletRes] = await Promise.all([
-      withWalletTimeout(authFetch(`${API}/admin/publications`), 'load publication review'),
-      withWalletTimeout(authFetch(`${API}/admin/ledger`), 'load the ledger'),
-      withWalletTimeout(authFetch(`${API}/admin/payments`), 'load payments'),
-      withWalletTimeout(authFetch(`${API}/admin/settings`), 'load admin settings'),
-      withWalletTimeout(authFetch(`${API}/admin/wallet`), 'load the server wallet')
+      authFetch(`${API}/admin/publications`, undefined, 'load publication review'),
+      authFetch(`${API}/admin/ledger`, undefined, 'load the ledger'),
+      authFetch(`${API}/admin/payments`, undefined, 'load payments'),
+      authFetch(`${API}/admin/settings`, undefined, 'load admin settings'),
+      authFetch(`${API}/admin/wallet`, undefined, 'load the server wallet')
     ])
     const pubJson = await pubRes.json()
     const ledgerJson = await ledgerRes.json()
@@ -1447,7 +1453,7 @@ function Admin ({ status, refreshStatus }: { status: Status | null, refreshStatu
     setServerWallet({ serverPublicKey: walletJson.serverPublicKey, balanceSats: Number(walletJson.balanceSats ?? 0) })
   }
   const loadTelemetry = async (): Promise<void> => {
-    const res = await withWalletTimeout(authFetch(`${API}/admin/telemetry`), 'load diagnostics')
+    const res = await authFetch(`${API}/admin/telemetry`, undefined, 'load diagnostics')
     const json = await res.json()
     if (!res.ok) throw new Error(json.message ?? 'Could not load diagnostics')
     setTelemetry(json.events ?? [])
@@ -1536,11 +1542,11 @@ function Admin ({ status, refreshStatus }: { status: Status | null, refreshStatu
   }
   const fundServer = async (): Promise<void> => {
     if (fundAmountSats <= 0) throw new Error('Enter a funding amount greater than zero.')
-    const res = await withWalletTimeout(authFetch(`${API}/admin/funding`, {
+    const res = await authFetch(`${API}/admin/funding`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ amountSats: fundAmountSats })
-    }), 'fund the server wallet')
+    }, 'fund the server wallet')
     const json = await res.json().catch(() => ({}))
     if (!res.ok) throw new Error(json.message ?? 'Could not fund server wallet')
     await refresh()
