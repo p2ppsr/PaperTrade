@@ -122,13 +122,13 @@ function base64ToBlob (base64: string, mimeType: string): Blob {
   return new Blob([bytes], { type: mimeType })
 }
 
-async function responseToPngBlob (res: Response, fallbackMessage: string): Promise<Blob> {
+async function responseToPngBlob (res: Response, fallbackMessage: string, expectJson = false): Promise<Blob> {
   if (!res.ok) {
     const json = await res.json().catch(() => ({}))
     throw new Error(json.message ?? json.description ?? `${fallbackMessage} with HTTP ${res.status}`)
   }
   const contentType = res.headers.get('content-type') ?? ''
-  if (contentType.includes('application/json')) {
+  if (expectJson || contentType.includes('application/json')) {
     const json = await res.json()
     if (json.mimeType !== 'image/png' || typeof json.dataBase64 !== 'string') {
       throw new Error(`${fallbackMessage}: server did not return a rendered page image`)
@@ -384,7 +384,7 @@ function Reader ({ status }: { status: Status | null }): JSX.Element {
     setImageUrl(null)
     setMessage('Loading page...')
     void pageFetch(`${API}/publications/${id}/pages/${currentPage}`, currentPage)
-      .then(async res => await responseToPngBlob(res, 'Page request failed'))
+      .then(async res => await responseToPngBlob(res, 'Page request failed', currentPage > 1))
       .then(blob => {
         if (!live) return
         setImageUrl(URL.createObjectURL(blob))
@@ -430,7 +430,7 @@ function AuthorPreview (): JSX.Element {
     setImageUrl(null)
     setMessage('Loading preview...')
     void authFetch(withFormatJson(`${API}/me/publications/${id}/pages/${currentPage}`))
-      .then(async res => await responseToPngBlob(res, 'Preview failed'))
+      .then(async res => await responseToPngBlob(res, 'Preview failed', true))
       .then(blob => {
         if (!live) return
         setImageUrl(URL.createObjectURL(blob))
