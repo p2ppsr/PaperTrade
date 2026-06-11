@@ -355,6 +355,17 @@ h1 {
   margin-top: 18px;
 }
 
+.payout-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin: 14px 0;
+}
+
+.payout-actions .primary-action {
+  margin-top: 0;
+}
+
 .avatar-row {
   align-items: end;
   display: grid;

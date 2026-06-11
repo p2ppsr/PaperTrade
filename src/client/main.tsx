@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react'
 import { createRoot } from 'react-dom/client'
 import { BrowserRouter, Link, Route, Routes, useLocation, useNavigate, useParams } from 'react-router-dom'
-import { AuthFetch, WalletClient } from '@bsv/sdk'
+import { AuthFetch, Utils, WalletClient } from '@bsv/sdk'
 import { BookOpen, Check, ExternalLink, FileText, Home, Library, MessageCircle, Monitor, RefreshCw, Settings, Smartphone, Upload, User } from 'lucide-react'
 import './styles.css'
 
@@ -36,6 +36,17 @@ interface AuthorProfile {
   bio?: string | null
   avatar_url?: string | null
   display_unit?: 'sats' | 'usd_cents' | null
+}
+
+interface AuthorPayoutPayload {
+  payoutId: string
+  amountSats: number
+  txBase64: string
+  outputIndex: number
+  derivationPrefix: string
+  derivationSuffix: string
+  serverIdentityKey: string
+  status: string
 }
 
 const API = '/api'
@@ -696,6 +707,8 @@ function Author ({ status }: { status: Status | null }): JSX.Element {
   const [description, setDescription] = useState('')
   const [selectedFile, setSelectedFile] = useState<File | null>(null)
   const [message, setMessage] = useState('')
+  const [payoutBusy, setPayoutBusy] = useState(false)
+  const [showPayoutSupport, setShowPayoutSupport] = useState(false)
   const load = async (): Promise<void> => {
     const [profileRes, publicationsRes, ledgerRes] = await Promise.all([
       withWalletTimeout(authFetch(`${API}/me/profile`), 'load your author profile'),
@@ -806,6 +819,64 @@ function Author ({ status }: { status: Status | null }): JSX.Element {
     setMessage('Publication deleted.')
     postSignal('author.publication_deleted', usercomMetadata({ surface: 'author', tags: ['author'], context: { publicationId: id } }))
   }
+  const requestPayout = async (): Promise<void> => {
+    setPayoutBusy(true)
+    setShowPayoutSupport(false)
+    try {
+      const res = await authFetch(`${API}/me/payouts`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ amountSats: balanceSats })
+      })
+      const json: { payout?: AuthorPayoutPayload, message?: string } = await res.json()
+      if (!res.ok || json.payout == null) throw new Error(json.message ?? 'Could not create payout')
+
+      const payout = json.payout
+      const wallet = getWallet()
+      try {
+        const result = await withWalletTimeout<{ accepted?: boolean }>((wallet as any).internalizeAction({
+          tx: Utils.toArray(payout.txBase64, 'base64'),
+          outputs: [{
+            outputIndex: payout.outputIndex,
+            protocol: 'wallet payment',
+            paymentRemittance: {
+              derivationPrefix: payout.derivationPrefix,
+              derivationSuffix: payout.derivationSuffix,
+              senderIdentityKey: payout.serverIdentityKey
+            }
+          }],
+          description: 'PaperTrade author payout',
+          labels: ['papertrade-payout']
+        }, WALLET_ORIGINATOR), 'receive your payout')
+        if (result?.accepted !== true) throw new Error('Wallet did not accept the payout')
+
+        const ack = await authFetch(`${API}/me/payouts/${payout.payoutId}/ack`, {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ accepted: true })
+        })
+        const ackJson = await ack.json()
+        if (!ack.ok) throw new Error(ackJson.message ?? 'Payout was received, but the server did not record the acknowledgement')
+        await load()
+        setMessage('Payout received by your BRC100 wallet.')
+        postSignal('author.payout_internalized', usercomMetadata({ surface: 'author-payout', tags: ['success'], context: { amountSats: payout.amountSats, payoutId: payout.payoutId } }))
+      } catch (err) {
+        const failureReason = err instanceof Error ? err.message : 'Wallet did not acknowledge the payout'
+        await authFetch(`${API}/me/payouts/${payout.payoutId}/ack`, {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ accepted: false, failureReason })
+        }).catch(() => undefined)
+        await load().catch(() => undefined)
+        setShowPayoutSupport(true)
+        setMessage(`Payout is ready but your wallet did not confirm receiving it: ${failureReason}. Retry payout from this panel.`)
+        postSignal('author.payout_internalize_failed', usercomMetadata({ surface: 'author-payout', tags: ['wallet_failed'], context: { amountSats: payout.amountSats, payoutId: payout.payoutId, failureReason } }))
+      }
+    } finally {
+      setPayoutBusy(false)
+    }
+  }
+  const pendingPayout = payouts.find(payout => payout.status === 'pending_internalize' && payout.tx != null)
   return (
     <section className='surface'>
       <header className='page-head'>
@@ -864,15 +935,27 @@ function Author ({ status }: { status: Status | null }): JSX.Element {
       </section>
       <section className='tool-panel publication-list'>
         <h2>Payouts</h2>
-        <p>Current author balance: {balanceSats} sats. Admins create payouts from author balances in the Admin tab.</p>
+        <p>Your payable author balance is {balanceSats} sats. Pay it directly into the BRC100 wallet you are using now.</p>
+        <div className='payout-actions'>
+          <button className='button primary-action' disabled={payoutBusy || (balanceSats <= 0 && pendingPayout == null)} type='button' onClick={() => { void requestPayout().catch(err => { setShowPayoutSupport(true); setMessage(err.message) }) }}>
+            {pendingPayout != null ? <RefreshCw size={18} /> : <Check size={18} />}
+            {pendingPayout != null ? 'Retry wallet receipt' : `Pay out ${balanceSats} sats`}
+          </button>
+          <button className='button secondary' type='button' onClick={() => setShowPayoutSupport(value => !value)}>
+            <MessageCircle size={18} /> Payout support
+          </button>
+        </div>
+        <p className='hint'>PaperTrade creates a BRC29 wallet payment to your identity key. Your PaperTrade balance is reduced only after your wallet confirms receipt.</p>
         {payouts.map(payout => (
           <div className='row' key={payout.id}>
             <span>{payout.amount_sats} sats</span>
             <span>{payout.status}</span>
             <span>{payout.destination_type}</span>
+            {payout.failure_reason != null && payout.failure_reason !== '' && <span>{payout.failure_reason}</span>}
           </div>
         ))}
-        {payouts.length === 0 && <p className='empty'>No payouts recorded yet. Admins initiate payouts from the Admin tab.</p>}
+        {payouts.length === 0 && <p className='empty'>No payouts recorded yet.</p>}
+        {showPayoutSupport && <FeedbackPanel surface='author-payout' />}
       </section>
     </section>
   )

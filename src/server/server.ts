@@ -7,7 +7,7 @@ import path from 'path'
 import fs from 'fs/promises'
 import { fileURLToPath } from 'url'
 import { createHash, randomUUID } from 'crypto'
-import { P2PKH } from '@bsv/sdk'
+import { P2PKH, PublicKey, Random, Utils } from '@bsv/sdk'
 import { createAuthMiddleware } from '@bsv/auth-express-middleware'
 import { createPaymentMiddleware } from '@bsv/payment-express-middleware'
 import { db, getSettings, isAdmin, writeAudit } from './db.js'
@@ -24,6 +24,8 @@ const upload = multer({ dest: path.join(DATA_DIR, 'tmp'), limits: { fileSize: 25
 const JSON_BODY_LIMIT = process.env.JSON_BODY_LIMIT ?? '80mb'
 const MAX_JSON_UPLOAD_BYTES = 40 * 1024 * 1024
 const MAX_AVATAR_BYTES = 5 * 1024 * 1024
+const BRC29_PROTOCOL_ID = [2, '3241645161d8'] as const
+const AUTHOR_PAYOUT_PENDING_STATUSES = ['creating', 'pending_internalize']
 
 interface AuthenticatedRequest extends Request {
   auth?: { identityKey: string }
@@ -34,6 +36,17 @@ interface JsonUploadBody {
   fileName?: unknown
   mimeType?: unknown
   dataBase64?: unknown
+}
+
+interface AuthorPayoutPayload {
+  payoutId: string
+  amountSats: number
+  txBase64: string
+  outputIndex: number
+  derivationPrefix: string
+  derivationSuffix: string
+  serverIdentityKey: string
+  status: string
 }
 
 function identityKeyOf (req: Request): string | undefined {
@@ -159,6 +172,25 @@ async function hasValidEntitlement (publicationId: string, pageNumber: number, r
   return row != null
 }
 
+async function findAcceptedPaymentEntitlement (publicationId: string, pageNumber: number, readerIdentityKey?: string): Promise<boolean> {
+  if (readerIdentityKey == null) return false
+  const row = await db('payments')
+    .where({
+      publication_id: publicationId,
+      page_number: pageNumber,
+      reader_identity_key: readerIdentityKey,
+      status: 'accepted'
+    })
+    .andWhere('created_at', '>', db.raw('DATE_SUB(NOW(), INTERVAL 30 DAY)'))
+    .first()
+  return row != null
+}
+
+async function hasReadablePageAccess (publicationId: string, pageNumber: number, readerIdentityKey?: string): Promise<boolean> {
+  return await hasValidEntitlement(publicationId, pageNumber, readerIdentityKey) ||
+    await findAcceptedPaymentEntitlement(publicationId, pageNumber, readerIdentityKey)
+}
+
 async function calculatePagePrice (req: Request): Promise<number> {
   const pageNumber = Number(req.params.pageNumber)
   if (pageNumber === 1) return 0
@@ -167,7 +199,7 @@ async function calculatePagePrice (req: Request): Promise<number> {
     .first()
   if (publication == null) return 0
   const readerIdentityKey = identityKeyOf(req)
-  if (await hasValidEntitlement(publication.id, pageNumber, readerIdentityKey)) return 0
+  if (await hasReadablePageAccess(publication.id, pageNumber, readerIdentityKey)) return 0
   const settings = await getSettings()
   return Number(settings.price_per_page_sats)
 }
@@ -255,6 +287,11 @@ async function sendPublicationPageImage (publication: any, pageNumber: number, r
     res.status(404).json({ status: 'error', message: 'Page image not found' })
     return
   }
+  if (pageNumber === 1) {
+    res.setHeader('X-PaperTrade-Page-Access', 'free')
+  } else if (readerIdentityKey != null && await hasReadablePageAccess(publication.id, pageNumber, readerIdentityKey)) {
+    res.setHeader('X-PaperTrade-Page-Access', satsPaid > 0 ? 'paid' : 'owned')
+  }
   res.setHeader('Cache-Control', 'private, max-age=60')
   await sendPngResponse(req, res, page.image_path)
 }
@@ -267,6 +304,34 @@ async function sendPageImage (req: Request, res: Response): Promise<void> {
     return
   }
   await sendPublicationPageImage(publication, pageNumber, req, res)
+}
+
+async function getAuthorPayableBalance (identityKey: string, trx: any = db): Promise<number> {
+  const balance = await trx('ledger_entries')
+    .where({ account_type: 'author_payable', account_identity_key: identityKey })
+    .sum({ balance_sats: 'amount_sats' })
+    .first()
+  return Number(balance?.balance_sats ?? 0)
+}
+
+function actionTxToBase64 (tx: unknown): string {
+  if (typeof tx === 'string') return tx
+  if (Array.isArray(tx)) return Utils.toBase64(tx as number[])
+  if (tx instanceof Uint8Array) return Utils.toBase64(Array.from(tx))
+  throw new Error('Server wallet did not return transaction data for this payout')
+}
+
+function publicAuthorPayout (payout: any): AuthorPayoutPayload {
+  return {
+    payoutId: String(payout.id),
+    amountSats: Number(payout.amount_sats),
+    txBase64: String(payout.tx ?? ''),
+    outputIndex: Number(payout.output_index ?? 0),
+    derivationPrefix: String(payout.derivation_prefix ?? ''),
+    derivationSuffix: String(payout.derivation_suffix ?? ''),
+    serverIdentityKey: String(payout.server_identity_key ?? ''),
+    status: String(payout.status)
+  }
 }
 
 function publicPublicationFields (row: any): Record<string, unknown> {
@@ -458,6 +523,97 @@ async function createApp (): Promise<express.Express> {
     }))
   }
   const walletBootstrap = await createServerWallet()
+
+  async function createAuthorWalletPayout (authorIdentityKey: string, amountSats: number, requestedBy: string): Promise<any> {
+    const existing = await db('payouts')
+      .where({ author_identity_key: authorIdentityKey, destination_type: 'brc100_identity', destination: authorIdentityKey })
+      .whereIn('status', AUTHOR_PAYOUT_PENDING_STATUSES)
+      .whereNotNull('tx')
+      .orderBy('created_at', 'desc')
+      .first()
+    if (existing != null) {
+      await db('payouts').where({ id: existing.id }).update({
+        retry_count: db.raw('COALESCE(retry_count, 0) + 1'),
+        last_retry_at: db.fn.now(),
+        updated_at: db.fn.now()
+      })
+      return { ...existing, retry_count: Number(existing.retry_count ?? 0) + 1 }
+    }
+
+    if (amountSats <= 0) throw new Error('No author balance is available for payout')
+    const author = await db('authors').where({ identity_key: authorIdentityKey }).first()
+    if (author == null) throw new Error('Author profile not found')
+    const balanceSats = await getAuthorPayableBalance(authorIdentityKey)
+    if (amountSats > balanceSats) throw new Error('Payout amount exceeds current author balance')
+
+    const payoutId = randomUUID()
+    await db('payouts').insert({
+      id: payoutId,
+      author_identity_key: authorIdentityKey,
+      amount_sats: amountSats,
+      destination_type: 'brc100_identity',
+      destination: authorIdentityKey,
+      status: 'creating',
+      requested_by: requestedBy
+    })
+
+    try {
+      const derivationPrefix = Utils.toBase64(Random(8))
+      const derivationSuffix = Utils.toBase64(Utils.toArray(String(Date.now()), 'utf8'))
+      const { publicKey: derivedPubKey } = await walletBootstrap.wallet.getPublicKey({
+        protocolID: BRC29_PROTOCOL_ID,
+        keyID: `${derivationPrefix} ${derivationSuffix}`,
+        counterparty: authorIdentityKey
+      })
+      const pkh = PublicKey.fromString(String(derivedPubKey)).toHash('hex') as string
+      const result = await walletBootstrap.wallet.createAction({
+        description: `PaperTrade payout ${payoutId.slice(0, 8)}`,
+        outputs: [{
+          lockingScript: `76a914${pkh}88ac`,
+          satoshis: amountSats,
+          outputDescription: 'PaperTrade author payout',
+          customInstructions: JSON.stringify({
+            derivationPrefix,
+            derivationSuffix,
+            serverIdentityKey: walletBootstrap.publicKey
+          }),
+          tags: ['papertrade-payout']
+        }],
+        labels: ['papertrade-payout'],
+        options: {
+          randomizeOutputs: false,
+          returnTXIDOnly: false
+        }
+      })
+      const txBase64 = actionTxToBase64(result.tx)
+      await db('payouts').where({ id: payoutId }).update({
+        status: 'pending_internalize',
+        txid: result.txid ?? null,
+        tx: txBase64,
+        output_index: 0,
+        derivation_prefix: derivationPrefix,
+        derivation_suffix: derivationSuffix,
+        server_identity_key: walletBootstrap.publicKey,
+        updated_at: db.fn.now()
+      })
+      await writeAudit('author_payout_created', requestedBy, 'payout', payoutId, {
+        amountSats,
+        destinationType: 'brc100_identity'
+      })
+      return await db('payouts').where({ id: payoutId }).first()
+    } catch (err: any) {
+      await db('payouts').where({ id: payoutId }).update({
+        status: 'failed',
+        failure_reason: err?.message ?? 'Payout creation failed',
+        updated_at: db.fn.now()
+      })
+      await writeAudit('author_payout_failed', requestedBy, 'payout', payoutId, {
+        amountSats,
+        reason: err?.message ?? 'Payout creation failed'
+      })
+      throw err
+    }
+  }
 
   const app = express()
   app.disable('x-powered-by')
@@ -732,15 +888,84 @@ async function createApp (): Promise<express.Express> {
   api.get('/me/ledger', requireAuth, async (req, res) => {
     const identityKey = identityKeyOf(req)
     if (identityKey == null) throw new Error('auth middleware invariant failed')
-    const balance = await db('ledger_entries')
-      .where({ account_type: 'author_payable', account_identity_key: identityKey })
-      .sum<{ balance_sats: string | number | null }>({ balance_sats: 'amount_sats' })
-      .first()
     const payouts = await db('payouts')
       .where({ author_identity_key: identityKey })
       .orderBy('created_at', 'desc')
       .limit(50)
-    res.json({ status: 'success', balanceSats: Number(balance?.balance_sats ?? 0), payouts })
+    res.json({ status: 'success', balanceSats: await getAuthorPayableBalance(identityKey), payouts })
+  })
+
+  api.post('/me/payouts', requireAuth, async (req, res) => {
+    const identityKey = identityKeyOf(req)
+    if (identityKey == null) throw new Error('auth middleware invariant failed')
+    await ensureAuthor(identityKey)
+    const availableBalance = await getAuthorPayableBalance(identityKey)
+    const requestedAmount = req.body.amountSats == null ? availableBalance : asPositiveInteger(req.body.amountSats, availableBalance)
+    try {
+      const payout = await createAuthorWalletPayout(identityKey, requestedAmount, identityKey)
+      res.json({ status: 'success', payout: publicAuthorPayout(payout) })
+    } catch (err: any) {
+      res.status(400).json({ status: 'error', message: err?.message ?? 'Could not create payout' })
+    }
+  })
+
+  api.post('/me/payouts/:id/ack', requireAuth, async (req, res) => {
+    const identityKey = identityKeyOf(req)
+    if (identityKey == null) throw new Error('auth middleware invariant failed')
+    const accepted = req.body.accepted === true
+    const failureReason = typeof req.body.failureReason === 'string' && req.body.failureReason.trim() !== ''
+      ? req.body.failureReason.trim().slice(0, 1000)
+      : null
+
+    await db.transaction(async trx => {
+      const payout = await trx('payouts')
+        .where({ id: req.params.id, author_identity_key: identityKey, destination_type: 'brc100_identity' })
+        .forUpdate()
+        .first()
+      if (payout == null) {
+        res.status(404).json({ status: 'error', message: 'Payout not found' })
+        return
+      }
+      if (payout.status === 'internalized' || payout.status === 'broadcast') {
+        res.json({ status: 'success', payoutStatus: payout.status })
+        return
+      }
+      if (!accepted) {
+        await trx('payouts').where({ id: payout.id }).update({
+          status: 'pending_internalize',
+          failure_reason: failureReason ?? 'Wallet did not acknowledge the payout yet',
+          updated_at: trx.fn.now()
+        })
+        await writeAudit('author_payout_internalize_failed', identityKey, 'payout', payout.id, { failureReason }, trx)
+        res.json({ status: 'success', payoutStatus: 'pending_internalize' })
+        return
+      }
+
+      const existingDebit = await trx('ledger_entries')
+        .where({ source_type: 'payout', source_id: payout.id, account_type: 'author_payable' })
+        .first()
+      if (existingDebit == null) {
+        await trx('ledger_entries').insert({
+          account_type: 'author_payable',
+          account_identity_key: identityKey,
+          amount_sats: -Number(payout.amount_sats),
+          source_type: 'payout',
+          source_id: payout.id,
+          memo: 'Self-serve payout to BRC100 wallet'
+        })
+      }
+      await trx('payouts').where({ id: payout.id }).update({
+        status: 'internalized',
+        failure_reason: null,
+        internalized_at: trx.fn.now(),
+        client_ack_at: trx.fn.now(),
+        updated_at: trx.fn.now()
+      })
+      await writeAudit('author_payout_internalized', identityKey, 'payout', payout.id, {
+        amountSats: Number(payout.amount_sats)
+      }, trx)
+      res.json({ status: 'success', payoutStatus: 'internalized' })
+    })
   })
 
   api.post('/me/publications', requireAuth, async (req, res) => {
