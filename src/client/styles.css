@@ -92,6 +92,7 @@ label {
   display: grid;
   grid-template-columns: 248px 1fr;
   min-height: 100vh;
+  min-width: 0;
   width: 100%;
 }
 
@@ -106,6 +107,7 @@ label {
   padding: 22px;
   position: sticky;
   top: 0;
+  min-width: 0;
 }
 
 .brand {
@@ -133,6 +135,7 @@ label {
 nav {
   display: grid;
   gap: 4px;
+  min-width: 0;
 }
 
 nav a {
@@ -198,6 +201,7 @@ h1,
 h2,
 h3,
 p {
+  max-width: 100%;
   margin-top: 0;
   overflow-wrap: anywhere;
 }
@@ -931,6 +935,7 @@ h1 {
   nav {
     display: flex;
     gap: 6px;
+    max-width: 100%;
     overflow-x: auto;
     padding-bottom: 2px;
     scrollbar-width: none;
@@ -973,6 +978,20 @@ h1 {
   main {
     max-width: 100vw;
     padding: 22px 16px 42px;
+    width: 100%;
+  }
+
+  .surface,
+  .publication,
+  .tool-panel,
+  .feedback-panel,
+  .wallet-help,
+  .about-panel,
+  .review-card,
+  .appearance-preview,
+  .preview-card {
+    max-width: 100%;
+    min-width: 0;
   }
 
   h1 {
@@ -1101,6 +1120,18 @@ h1 {
     position: relative;
   }
 
+  .wallet-help-copy h2 {
+    font-size: 24px;
+  }
+
+  .wallet-option {
+    grid-template-columns: 22px minmax(0, 1fr);
+  }
+
+  .wallet-option > svg:last-child {
+    display: none;
+  }
+
   .wallet-close {
     background: transparent;
     color: var(--pt-muted);
@@ -1137,5 +1168,9 @@ h1 {
 
   h1 {
     font-size: 34px;
+  }
+
+  .wallet-help-copy h2 {
+    font-size: 22px;
   }
 }
