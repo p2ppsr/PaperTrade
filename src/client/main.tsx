@@ -36,7 +36,7 @@ interface AuthorProfile {
 }
 
 const API = '/api'
-const WALLET_ORIGIN = (import.meta as any).env?.VITE_WALLET_ORIGIN ?? 'localhost:3321'
+const WALLET_ORIGINATOR = (import.meta as any).env?.VITE_WALLET_ORIGINATOR ?? window.location.hostname
 const USERCOM_SOURCE = 'papertrade'
 const USERCOM_SUBMIT_ENDPOINT = 'https://usercom.babbage.systems/submit'
 const USERCOM_SIGNAL_ENDPOINT = 'https://usercom.babbage.systems/signal'
@@ -44,7 +44,7 @@ const GET_METANET_URL = 'https://getmetanet.com'
 const WALLET_TIMEOUT_MS = 20000
 
 function getWallet (): WalletClient {
-  return new WalletClient('auto', WALLET_ORIGIN)
+  return new WalletClient('auto', WALLET_ORIGINATOR)
 }
 
 function absoluteRequestUrl (url: string): string {
@@ -81,7 +81,7 @@ function paymentUnitLabel (unit: 'sats' | 'usd_cents'): string {
 
 async function authFetch (url: string, init?: RequestInit): Promise<Response> {
   const wallet = getWallet()
-  const fetcher = new AuthFetch(wallet)
+  const fetcher = new AuthFetch(wallet, undefined, undefined, WALLET_ORIGINATOR)
   return await fetcher.fetch(absoluteRequestUrl(url), init as any)
 }
 
