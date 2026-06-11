@@ -45,6 +45,7 @@ const USERCOM_SUBMIT_ENDPOINT = 'https://usercom.babbage.systems/submit'
 const USERCOM_SIGNAL_ENDPOINT = 'https://usercom.babbage.systems/signal'
 const GET_METANET_URL = 'https://getmetanet.com'
 const WALLET_TIMEOUT_MS = 20000
+let walletRequestQueue: Promise<unknown> = Promise.resolve()
 
 function getWallet (): WalletClient {
   return new WalletClient(WALLET_SUBSTRATE, WALLET_ORIGINATOR)
@@ -83,9 +84,14 @@ function paymentUnitLabel (unit: 'sats' | 'usd_cents'): string {
 }
 
 async function authFetch (url: string, init?: RequestInit): Promise<Response> {
-  const wallet = getWallet()
-  const fetcher = new AuthFetch(wallet, undefined, undefined, WALLET_ORIGINATOR)
-  return await fetcher.fetch(absoluteRequestUrl(url), init as any)
+  const request = async (): Promise<Response> => {
+    const wallet = getWallet()
+    const fetcher = new AuthFetch(wallet, undefined, undefined, WALLET_ORIGINATOR)
+    return await fetcher.fetch(absoluteRequestUrl(url), init as any)
+  }
+  const next = walletRequestQueue.then(request, request)
+  walletRequestQueue = next.then(() => undefined, () => undefined)
+  return await next
 }
 
 async function withWalletTimeout<T> (promise: Promise<T>, action: string): Promise<T> {
