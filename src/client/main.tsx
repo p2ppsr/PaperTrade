@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useState } from 'react'
 import { createRoot } from 'react-dom/client'
 import { BrowserRouter, Link, Route, Routes, useLocation, useNavigate, useParams } from 'react-router-dom'
 import { AuthFetch, Utils, WalletClient } from '@bsv/sdk'
+import { IdentityCard } from '@bsv/identity-react'
 import { BookOpen, Check, ExternalLink, FileText, Home, Library, MessageCircle, Monitor, RefreshCw, Settings, Smartphone, Upload, User } from 'lucide-react'
 import './styles.css'
 
@@ -47,6 +48,29 @@ interface AuthorPayoutPayload {
   derivationSuffix: string
   serverIdentityKey: string
   status: string
+}
+
+interface AdminPublication {
+  id: string
+  title: string
+  description?: string | null
+  display_name?: string | null
+  author_identity_key: string
+  status: string
+  page_count: number
+  updated_at?: string
+  published_at?: string | null
+}
+
+interface AdminUser {
+  identity_key: string
+  added_by?: string | null
+  created_at?: string
+}
+
+interface ServerWallet {
+  serverPublicKey: string
+  balanceSats: number
 }
 
 const API = '/api'
@@ -368,6 +392,23 @@ function WalletHelp ({ message, freePageUrl }: { message: string, freePageUrl?: 
   )
 }
 
+function looksLikeIdentityKey (value?: string | null): value is string {
+  return typeof value === 'string' && /^[0-9a-fA-F]{66}$/.test(value)
+}
+
+function shortKey (value: string): string {
+  return `${value.slice(0, 10)}...${value.slice(-6)}`
+}
+
+function IdentityPill ({ identityKey, label }: { identityKey?: string | null, label?: string | null }): JSX.Element {
+  if (!looksLikeIdentityKey(identityKey)) return <span className='identity-fallback'>{label ?? 'Unknown identity'}</span>
+  return (
+    <div className='identity-card-wrap' title={label ?? shortKey(identityKey)}>
+      <IdentityCard identityKey={identityKey} />
+    </div>
+  )
+}
+
 function FeedbackPanel ({ surface }: { surface: string }): JSX.Element {
   const [form, setForm] = useState({ name: '', email: '', feedback: '' })
   const [message, setMessage] = useState('')
@@ -482,7 +523,7 @@ function Newsstand (): JSX.Element {
               <h2>{pub.title}</h2>
               <p>{pub.description}</p>
               <footer>
-                <span>{pub.authorName ?? pub.authorIdentityKey.slice(0, 12)}</span>
+                <IdentityPill identityKey={pub.authorIdentityKey} label={pub.authorName} />
                 <span>{pub.pageCount} pages</span>
               </footer>
               <Link className='button' to={`/publication/${pub.id}`}>Open</Link>
@@ -516,7 +557,7 @@ function PublicationDetail (): JSX.Element {
         </div>
       </header>
       <div className='facts'>
-        <span>{publication.authorName}</span>
+        <IdentityPill identityKey={publication.authorIdentityKey} label={publication.authorName} />
         <span>{publication.pageCount} pages</span>
       </div>
       <Link className='button' to={`/read/${publication.id}/1`}><BookOpen size={18} /> Start reading</Link>
@@ -576,6 +617,10 @@ function AuthorPreview (): JSX.Element {
   const [imageUrl, setImageUrl] = useState<string | null>(null)
   const [message, setMessage] = useState('Loading preview...')
   const navigate = useNavigate()
+  const location = useLocation()
+  const isAdminPreview = location.pathname.startsWith('/admin/')
+  const previewBase = isAdminPreview ? '/admin/read' : '/author/read'
+  const backPath = isAdminPreview ? '/admin' : '/author'
 
   useEffect(() => {
     let live = true
@@ -601,10 +646,10 @@ function AuthorPreview (): JSX.Element {
   return (
     <section className='reader'>
       <div className='reader-toolbar'>
-        <Link className='button secondary' to='/author'>Back to author</Link>
-        <button type='button' onClick={() => navigate(`/author/read/${id}/${Math.max(1, currentPage - 1)}`)}>Previous</button>
+        <Link className='button secondary' to={backPath}>{isAdminPreview ? 'Back to admin' : 'Back to author'}</Link>
+        <button type='button' onClick={() => navigate(`${previewBase}/${id}/${Math.max(1, currentPage - 1)}`)}>Previous</button>
         <span>Preview page {currentPage}</span>
-        <button type='button' onClick={() => navigate(`/author/read/${id}/${currentPage + 1}`)}>Next</button>
+        <button type='button' onClick={() => navigate(`${previewBase}/${id}/${currentPage + 1}`)}>Next</button>
       </div>
       {message !== '' && !isWalletHelpMessage(message) && <p className='empty'>{message}</p>}
       <WalletHelp message={message} />
@@ -963,9 +1008,13 @@ function Author ({ status }: { status: Status | null }): JSX.Element {
 
 function Admin (): JSX.Element {
   const [message, setMessage] = useState('')
-  const [publications, setPublications] = useState<any[]>([])
+  const [publications, setPublications] = useState<AdminPublication[]>([])
   const [authorBalances, setAuthorBalances] = useState<any[]>([])
   const [payouts, setPayouts] = useState<any[]>([])
+  const [admins, setAdmins] = useState<AdminUser[]>([])
+  const [newAdminKey, setNewAdminKey] = useState('')
+  const [serverWallet, setServerWallet] = useState<ServerWallet | null>(null)
+  const [fundAmountSats, setFundAmountSats] = useState(1000)
   const [payoutForm, setPayoutForm] = useState({
     authorIdentityKey: '',
     amountSats: 0,
@@ -973,32 +1022,80 @@ function Admin (): JSX.Element {
     destination: ''
   })
   const refresh = async (): Promise<void> => {
-    const [pubRes, ledgerRes, paymentRes] = await Promise.all([
+    const [pubRes, ledgerRes, paymentRes, settingsRes, walletRes] = await Promise.all([
       withWalletTimeout(authFetch(`${API}/admin/publications`), 'load publication review'),
       withWalletTimeout(authFetch(`${API}/admin/ledger`), 'load the ledger'),
-      withWalletTimeout(authFetch(`${API}/admin/payments`), 'load payments')
+      withWalletTimeout(authFetch(`${API}/admin/payments`), 'load payments'),
+      withWalletTimeout(authFetch(`${API}/admin/settings`), 'load admin settings'),
+      withWalletTimeout(authFetch(`${API}/admin/wallet`), 'load the server wallet')
     ])
     const pubJson = await pubRes.json()
     const ledgerJson = await ledgerRes.json()
     const paymentJson = await paymentRes.json()
+    const settingsJson = await settingsRes.json()
+    const walletJson = await walletRes.json()
     if (!pubRes.ok) throw new Error(pubJson.message ?? 'Could not load publication review')
     if (!ledgerRes.ok) throw new Error(ledgerJson.message ?? 'Could not load ledger')
     if (!paymentRes.ok) throw new Error(paymentJson.message ?? 'Could not load payments')
+    if (!settingsRes.ok) throw new Error(settingsJson.message ?? 'Could not load admin list')
+    if (!walletRes.ok) throw new Error(walletJson.message ?? 'Could not load server wallet')
     setPublications(pubJson.publications ?? [])
     setAuthorBalances(ledgerJson.authorBalances ?? [])
     setPayouts(paymentJson.payouts ?? [])
+    setAdmins(settingsJson.admins ?? [])
+    setServerWallet({ serverPublicKey: walletJson.serverPublicKey, balanceSats: Number(walletJson.balanceSats ?? 0) })
   }
   useEffect(() => { void refresh().catch(err => setMessage(friendlyErrorMessage(err, 'Could not load admin workspace'))) }, [])
-  const review = async (id: string, action: 'publish' | 'reject'): Promise<void> => {
+  const review = async (id: string, action: 'publish' | 'reject' | 'unpublish' | 'return_to_review'): Promise<void> => {
     const res = await authFetch(`${API}/admin/publications/${id}/review`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ action })
     })
-    if (!res.ok) throw new Error('Review failed')
+    const json = await res.json().catch(() => ({}))
+    if (!res.ok) throw new Error(json.message ?? 'Review failed')
     await refresh()
-    setMessage(action === 'publish' ? 'Publication published.' : 'Publication rejected.')
+    const labels: Record<string, string> = {
+      publish: 'Publication published.',
+      reject: 'Publication rejected and deleted.',
+      unpublish: 'Publication unpublished.',
+      return_to_review: 'Publication returned to review.'
+    }
+    setMessage(labels[action])
     postSignal('admin.publication_reviewed', usercomMetadata({ surface: 'admin', tags: [`action:${action}`], context: { publicationId: id } }))
+  }
+  const addAdmin = async (): Promise<void> => {
+    const identityKey = newAdminKey.trim()
+    if (identityKey === '') throw new Error('Enter an identity key to add an admin.')
+    const res = await authFetch(`${API}/admin/admins`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ identityKey })
+    })
+    const json = await res.json().catch(() => ({}))
+    if (!res.ok) throw new Error(json.message ?? 'Could not add admin')
+    setNewAdminKey('')
+    await refresh()
+    setMessage('Admin added.')
+  }
+  const removeAdmin = async (identityKey: string): Promise<void> => {
+    const res = await authFetch(`${API}/admin/admins/${encodeURIComponent(identityKey)}`, { method: 'DELETE' })
+    const json = await res.json().catch(() => ({}))
+    if (!res.ok) throw new Error(json.message ?? 'Could not remove admin')
+    await refresh()
+    setMessage('Admin removed.')
+  }
+  const fundServer = async (): Promise<void> => {
+    if (fundAmountSats <= 0) throw new Error('Enter a funding amount greater than zero.')
+    const res = await withWalletTimeout(authFetch(`${API}/admin/funding`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ amountSats: fundAmountSats })
+    }), 'fund the server wallet')
+    const json = await res.json().catch(() => ({}))
+    if (!res.ok) throw new Error(json.message ?? 'Could not fund server wallet')
+    await refresh()
+    setMessage(`Server wallet funded with ${fundAmountSats} sats.`)
   }
   const createPayout = async (): Promise<void> => {
     const res = await authFetch(`${API}/admin/payouts`, {
@@ -1025,15 +1122,67 @@ function Admin (): JSX.Element {
       <section className='tool-panel'>
         <h2>Publication review</h2>
         {publications.map(pub => (
-          <div className='row' key={pub.id}>
-            <span>{pub.title}</span>
-            <span>{pub.display_name ?? 'Unknown author'}</span>
-            <span>{pub.status} · {pub.page_count} pages</span>
-            <button type='button' onClick={() => { void review(pub.id, 'publish') }}>Publish</button>
-            <button type='button' onClick={() => { void review(pub.id, 'reject') }}>Reject</button>
-          </div>
+          <article className='review-card' key={pub.id}>
+            <div className='review-main'>
+              <div>
+                <span className={`status-pill status-${pub.status}`}>{pub.status}</span>
+                <h3>{pub.title}</h3>
+                <p>{pub.description ?? 'No description provided.'}</p>
+              </div>
+              <div className='review-meta'>
+                <IdentityPill identityKey={pub.author_identity_key} label={pub.display_name} />
+                <span>{Number(pub.page_count ?? 0)} pages</span>
+              </div>
+            </div>
+            <div className='review-actions'>
+              {Number(pub.page_count ?? 0) > 0 && <Link className='button secondary' to={`/admin/read/${String(pub.id)}/1`}>Preview</Link>}
+              {pub.status === 'published'
+                ? (
+                  <>
+                    <button type='button' onClick={() => { void review(pub.id, 'unpublish').catch(err => setMessage(err.message)) }}>Unpublish</button>
+                    <button type='button' className='secondary' onClick={() => { void review(pub.id, 'return_to_review').catch(err => setMessage(err.message)) }}>Return to review</button>
+                  </>
+                  )
+                : (
+                  <>
+                    <button type='button' disabled={Number(pub.page_count ?? 0) < 5} onClick={() => { void review(pub.id, 'publish').catch(err => setMessage(err.message)) }}>Publish</button>
+                    <button type='button' className='danger' onClick={() => { void review(pub.id, 'reject').catch(err => setMessage(err.message)) }}>Reject and delete</button>
+                  </>
+                  )}
+            </div>
+          </article>
         ))}
         {publications.length === 0 && <p className='empty'>No publications to review yet.</p>}
+      </section>
+      <section className='tool-panel publication-list'>
+        <h2>Server wallet</h2>
+        <div className='wallet-summary'>
+          <div>
+            <span className='hint'>Spendable balance</span>
+            <strong>{serverWallet?.balanceSats ?? 0} sats</strong>
+          </div>
+          <IdentityPill identityKey={serverWallet?.serverPublicKey} label='PaperTrade server' />
+        </div>
+        <form className='inline-form' onSubmit={e => { e.preventDefault(); void fundServer().catch(err => setMessage(friendlyErrorMessage(err, 'Could not fund server wallet'))) }}>
+          <label>Amount in sats <input type='number' min='1' value={fundAmountSats} onChange={e => setFundAmountSats(Number(e.target.value))} /></label>
+          <button className='button primary-action' type='submit'>Fund server wallet</button>
+        </form>
+        <p className='hint'>Funding uses the admin wallet you are using now. This gives the server wallet enough BSV to pay author withdrawals and cover fees.</p>
+      </section>
+      <section className='tool-panel publication-list'>
+        <h2>Admins</h2>
+        <form className='inline-form' onSubmit={e => { e.preventDefault(); void addAdmin().catch(err => setMessage(err.message)) }}>
+          <label>Identity key <input value={newAdminKey} onChange={e => setNewAdminKey(e.target.value)} placeholder='Admin identity key' /></label>
+          <button className='button primary-action' type='submit'>Add admin</button>
+        </form>
+        <div className='admin-list'>
+          {admins.map(admin => (
+            <div className='admin-list-row' key={admin.identity_key}>
+              <IdentityPill identityKey={admin.identity_key} />
+              <button type='button' className='danger' disabled={admins.length <= 1} onClick={() => { void removeAdmin(admin.identity_key).catch(err => setMessage(err.message)) }}>Remove</button>
+            </div>
+          ))}
+        </div>
       </section>
       <section className='tool-panel publication-list'>
         <h2>Payouts</h2>
@@ -1055,7 +1204,7 @@ function Admin (): JSX.Element {
             <h2>Author balances</h2>
             {authorBalances.map(balance => (
               <button className='balance-row' type='button' key={balance.account_identity_key} onClick={() => setPayoutForm({ ...payoutForm, authorIdentityKey: balance.account_identity_key, amountSats: Number(balance.balance_sats ?? 0) })}>
-                <span>{balance.account_identity_key}</span>
+                <IdentityPill identityKey={balance.account_identity_key} />
                 <strong>{Number(balance.balance_sats ?? 0)} sats</strong>
               </button>
             ))}
@@ -1094,6 +1243,7 @@ function AppRoutes ({ status, refresh }: { status: Status | null, refresh: () =>
         <Route path='/author' element={<Author status={status} />} />
         <Route path='/author/read/:id/:pageNumber' element={<AuthorPreview />} />
         <Route path='/admin' element={<Admin />} />
+        <Route path='/admin/read/:id/:pageNumber' element={<AuthorPreview />} />
         <Route path='/setup' element={<Setup status={status} refresh={refresh} />} />
       </Routes>
     </Shell>

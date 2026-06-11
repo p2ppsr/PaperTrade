@@ -256,6 +256,50 @@ h1 {
   margin: 14px 0;
 }
 
+.identity-card-wrap {
+  align-items: center;
+  display: inline-flex;
+  max-width: 100%;
+  min-width: 0;
+  overflow: hidden;
+  vertical-align: middle;
+}
+
+.identity-card-wrap > div {
+  max-width: 100%;
+  min-width: 0;
+  padding: 0 !important;
+}
+
+.identity-card-wrap .MuiAvatar-root {
+  height: 30px !important;
+  width: 30px !important;
+}
+
+.identity-card-wrap .MuiCardContent-root {
+  min-width: 0;
+  padding: 4px 6px !important;
+}
+
+.identity-card-wrap .MuiTypography-h6 {
+  font: inherit !important;
+  font-weight: 800 !important;
+  max-width: 190px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.identity-card-wrap .MuiTypography-body2 {
+  display: none;
+}
+
+.identity-fallback {
+  color: #5c6570;
+  font-weight: 800;
+  overflow-wrap: anywhere;
+}
+
 .pub-icon {
   align-items: center;
   background: #eaf1ee;
@@ -485,6 +529,115 @@ h1 {
   width: 100%;
 }
 
+.review-card {
+  border: 1px solid #ece8dd;
+  border-radius: 8px;
+  display: grid;
+  gap: 14px;
+  margin: 12px 0;
+  padding: 14px;
+}
+
+.review-main {
+  align-items: start;
+  display: grid;
+  gap: 16px;
+  grid-template-columns: minmax(0, 1fr) minmax(210px, auto);
+}
+
+.review-main h3 {
+  font-size: 20px;
+  line-height: 1.15;
+  margin: 8px 0;
+}
+
+.review-main p {
+  color: #4c514c;
+  line-height: 1.4;
+  margin-bottom: 0;
+  overflow-wrap: anywhere;
+}
+
+.review-meta {
+  color: #5c6570;
+  display: grid;
+  gap: 8px;
+  justify-items: end;
+}
+
+.review-actions,
+.inline-form,
+.admin-list-row,
+.wallet-summary {
+  align-items: end;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.inline-form label {
+  flex: 1 1 280px;
+  margin-bottom: 0;
+}
+
+.wallet-summary {
+  align-items: center;
+  border: 1px solid #ece8dd;
+  border-radius: 8px;
+  justify-content: space-between;
+  margin-bottom: 14px;
+  padding: 12px;
+}
+
+.wallet-summary strong {
+  display: block;
+  font-size: 24px;
+}
+
+.admin-list {
+  display: grid;
+  gap: 8px;
+  margin-top: 14px;
+}
+
+.admin-list-row {
+  align-items: center;
+  border: 1px solid #ece8dd;
+  border-radius: 8px;
+  justify-content: space-between;
+  padding: 10px;
+}
+
+.status-pill {
+  background: #eaf1ee;
+  border: 1px solid #bed5ce;
+  border-radius: 999px;
+  color: #1f4f46;
+  display: inline-flex;
+  font-size: 12px;
+  font-weight: 900;
+  line-height: 1;
+  padding: 6px 8px;
+  text-transform: uppercase;
+}
+
+.status-published {
+  background: #e7f0ed;
+  border-color: #1f4f46;
+}
+
+.status-submitted {
+  background: #fff8d8;
+  border-color: #ead37b;
+  color: #6d4d14;
+}
+
+.status-draft {
+  background: #f8fafb;
+  border-color: #d6dde2;
+  color: #5c6570;
+}
+
 .row {
   align-items: center;
   border-bottom: 1px solid #ece8dd;
@@ -618,6 +771,26 @@ h1 {
 
   .feedback-grid {
     grid-template-columns: 1fr;
+  }
+
+  .review-main {
+    grid-template-columns: 1fr;
+  }
+
+  .review-meta {
+    justify-items: start;
+  }
+
+  .review-actions .button,
+  .review-actions button,
+  .inline-form button,
+  .admin-list-row button {
+    width: 100%;
+  }
+
+  .wallet-summary {
+    align-items: start;
+    display: grid;
   }
 
   .wallet-help {

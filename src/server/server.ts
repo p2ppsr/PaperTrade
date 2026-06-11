@@ -14,7 +14,7 @@ import { db, getSettings, isAdmin, writeAudit } from './db.js'
 import { asPositiveInteger, splitCommission } from './money.js'
 import { createServerWallet, replacePersistedServerKey } from './wallet.js'
 import { getPublicationDir, processPublicationFile } from './content.js'
-import { STARTER_AUTHOR_IDENTITY_KEY, STARTER_AUTHOR_NAME, STARTER_WORKS, type StarterWork, writeStarterPdf } from './starterWorks.js'
+import { STARTER_AUTHOR_NAME, STARTER_WORKS, type StarterWork, writeStarterPdf } from './starterWorks.js'
 
 const serverDirname = path.dirname(fileURLToPath(import.meta.url))
 const HTTP_PORT = Number(process.env.HTTP_PORT ?? process.env.PORT ?? '3001')
@@ -26,6 +26,7 @@ const MAX_JSON_UPLOAD_BYTES = 40 * 1024 * 1024
 const MAX_AVATAR_BYTES = 5 * 1024 * 1024
 const BRC29_PROTOCOL_ID = [2, '3241645161d8'] as const
 const AUTHOR_PAYOUT_PENDING_STATUSES = ['creating', 'pending_internalize']
+const WALLET_BALANCE_BASKET = '893b7646de0e1c9f741bd6e9169b76a8847ae34adef7bef1e6a285371206d2e8'
 
 interface AuthenticatedRequest extends Request {
   auth?: { identityKey: string }
@@ -446,23 +447,24 @@ async function starterNeedsProcessing (publicationId: string): Promise<boolean> 
   }
 }
 
-async function seedStarterWork (work: StarterWork): Promise<boolean> {
+async function seedStarterWork (work: StarterWork, starterAuthorIdentityKey: string): Promise<boolean> {
   await db('publications')
     .insert({
       id: work.id,
-      author_identity_key: STARTER_AUTHOR_IDENTITY_KEY,
+      author_identity_key: starterAuthorIdentityKey,
       title: work.title,
       description: `${work.authorName}. ${work.description}`,
       status: 'published',
-      reviewed_by: STARTER_AUTHOR_IDENTITY_KEY,
+      reviewed_by: starterAuthorIdentityKey,
       published_at: db.fn.now()
     })
     .onConflict('id')
     .merge({
+      author_identity_key: starterAuthorIdentityKey,
       title: work.title,
       description: `${work.authorName}. ${work.description}`,
       status: 'published',
-      reviewed_by: STARTER_AUTHOR_IDENTITY_KEY,
+      reviewed_by: starterAuthorIdentityKey,
       published_at: db.fn.now(),
       updated_at: db.fn.now()
     })
@@ -472,23 +474,23 @@ async function seedStarterWork (work: StarterWork): Promise<boolean> {
   const starterPdfPath = path.join(DATA_DIR, 'tmp', `${work.id}.pdf`)
   await writeStarterPdf(work, starterPdfPath)
   const publication = await db('publications').where({ id: work.id }).first()
-  await processAndStorePublicationUpload(publication, STARTER_AUTHOR_IDENTITY_KEY, starterPdfPath, safeStarterFileName(work.title), 'application/pdf')
+  await processAndStorePublicationUpload(publication, starterAuthorIdentityKey, starterPdfPath, safeStarterFileName(work.title), 'application/pdf')
   await db('publications').where({ id: work.id }).update({
     status: 'published',
-    reviewed_by: STARTER_AUTHOR_IDENTITY_KEY,
+    reviewed_by: starterAuthorIdentityKey,
     published_at: db.fn.now(),
     updated_at: db.fn.now()
   })
   return true
 }
 
-async function seedStarterWorks (): Promise<void> {
+async function seedStarterWorks (starterAuthorIdentityKey: string): Promise<void> {
   if (process.env.PAPERTRADE_SEED_STARTER_WORKS === 'false') return
 
   await removeSeedTestData()
   await db('authors')
     .insert({
-      identity_key: STARTER_AUTHOR_IDENTITY_KEY,
+      identity_key: starterAuthorIdentityKey,
       display_name: STARTER_AUTHOR_NAME,
       bio: 'Royalty-free public-domain starter shelf for new PaperTrade servers.'
     })
@@ -501,19 +503,21 @@ async function seedStarterWorks (): Promise<void> {
 
   let processedCount = 0
   for (const work of STARTER_WORKS) {
-    if (await seedStarterWork(work)) processedCount += 1
+    if (await seedStarterWork(work, starterAuthorIdentityKey)) processedCount += 1
   }
   await writeAudit('starter_works_seeded', undefined, 'publication', 'starter-library', {
     workCount: STARTER_WORKS.length,
-    processedCount
+    processedCount,
+    starterAuthorIdentityKey
   })
 }
 
 async function createApp (): Promise<express.Express> {
   await fs.mkdir(DATA_DIR, { recursive: true })
   await db.migrate.latest()
+  const walletBootstrap = await createServerWallet()
   try {
-    await seedStarterWorks()
+    await seedStarterWorks(walletBootstrap.publicKey)
   } catch (err) {
     console.warn(JSON.stringify({
       level: 'warn',
@@ -522,7 +526,25 @@ async function createApp (): Promise<express.Express> {
       message: err instanceof Error ? err.message : 'Unknown starter seed error'
     }))
   }
-  const walletBootstrap = await createServerWallet()
+
+  async function getServerWalletBalance (): Promise<number> {
+    const wallet = walletBootstrap.wallet
+    if (typeof wallet.balance === 'function') {
+      const balance = await wallet.balance()
+      return Number(balance ?? 0)
+    }
+    const outputs = await wallet.listOutputs({ basket: WALLET_BALANCE_BASKET })
+    return Number(outputs?.totalOutputs ?? outputs?.outputs?.reduce((total: number, output: any) => total + Number(output.satoshis ?? 0), 0) ?? 0)
+  }
+
+  function payoutFailureMessage (err: any, amountSats: number): string {
+    const raw = String(err?.message ?? 'Payout creation failed')
+    const lower = raw.toLowerCase()
+    if (lower.includes('insufficient') || lower.includes('not enough') || lower.includes('fund')) {
+      return `The server wallet does not have enough spendable BSV to send this ${amountSats} sat payout and cover fees. Ask an admin to fund the PaperTrade server wallet, then retry.`
+    }
+    return raw
+  }
 
   async function createAuthorWalletPayout (authorIdentityKey: string, amountSats: number, requestedBy: string): Promise<any> {
     const existing = await db('payouts')
@@ -545,6 +567,10 @@ async function createApp (): Promise<express.Express> {
     if (author == null) throw new Error('Author profile not found')
     const balanceSats = await getAuthorPayableBalance(authorIdentityKey)
     if (amountSats > balanceSats) throw new Error('Payout amount exceeds current author balance')
+    const serverBalanceSats = await getServerWalletBalance().catch(() => 0)
+    if (serverBalanceSats < amountSats) {
+      throw new Error(`The server wallet has ${serverBalanceSats} sats available, but this payout needs ${amountSats} sats plus network fees. Ask an admin to fund the PaperTrade server wallet, then retry.`)
+    }
 
     const payoutId = randomUUID()
     await db('payouts').insert({
@@ -602,16 +628,17 @@ async function createApp (): Promise<express.Express> {
       })
       return await db('payouts').where({ id: payoutId }).first()
     } catch (err: any) {
+      const failureReason = payoutFailureMessage(err, amountSats)
       await db('payouts').where({ id: payoutId }).update({
         status: 'failed',
-        failure_reason: err?.message ?? 'Payout creation failed',
+        failure_reason: failureReason,
         updated_at: db.fn.now()
       })
       await writeAudit('author_payout_failed', requestedBy, 'payout', payoutId, {
         amountSats,
-        reason: err?.message ?? 'Payout creation failed'
+        reason: failureReason
       })
-      throw err
+      throw new Error(failureReason)
     }
   }
 
@@ -664,6 +691,13 @@ async function createApp (): Promise<express.Express> {
   const pagePaymentMiddleware = createPaymentMiddleware({
     wallet: walletBootstrap.wallet,
     calculateRequestPrice: calculatePagePrice as any
+  })
+
+  const calculateAdminFundingPrice = (req: { body?: { amountSats?: unknown } }): number => asPositiveInteger(req.body?.amountSats, 0)
+
+  const adminFundingPaymentMiddleware = createPaymentMiddleware({
+    wallet: walletBootstrap.wallet,
+    calculateRequestPrice: calculateAdminFundingPrice as any
   })
 
   const api = express.Router()
@@ -1159,15 +1193,44 @@ async function createApp (): Promise<express.Express> {
   })
 
   api.post('/admin/publications/:id/review', requireAdmin, async (req, res) => {
-    const action = req.body.action === 'reject' ? 'reject' : 'publish'
+    const requestedAction = String(req.body.action ?? 'publish')
+    const action = ['publish', 'reject', 'unpublish', 'return_to_review'].includes(requestedAction) ? requestedAction : 'publish'
+    const publication = await db('publications').where({ id: req.params.id }).first()
+    if (publication == null) {
+      res.status(404).json({ status: 'error', message: 'Publication not found' })
+      return
+    }
     if (action === 'reject') {
-      const publication = await db('publications').where({ id: req.params.id }).first()
-      if (publication == null) {
-        res.status(404).json({ status: 'error', message: 'Publication not found' })
-        return
-      }
       await deletePublication(publication.id, identityKeyOf(req))
       res.json({ status: 'success', deleted: true })
+      return
+    }
+    if (action === 'unpublish') {
+      await db('publications').where({ id: req.params.id }).update({
+        status: 'draft',
+        reviewed_by: null,
+        review_note: req.body.note ?? null,
+        published_at: null,
+        updated_at: db.fn.now()
+      })
+      await writeAudit('publication_unpublished', identityKeyOf(req), 'publication', req.params.id, { note: req.body.note })
+      res.json({ status: 'success' })
+      return
+    }
+    if (action === 'return_to_review') {
+      await db('publications').where({ id: req.params.id }).update({
+        status: 'submitted',
+        reviewed_by: null,
+        review_note: req.body.note ?? null,
+        published_at: null,
+        updated_at: db.fn.now()
+      })
+      await writeAudit('publication_returned_to_review', identityKeyOf(req), 'publication', req.params.id, { note: req.body.note })
+      res.json({ status: 'success' })
+      return
+    }
+    if (Number(publication.page_count ?? 0) < 5) {
+      res.status(400).json({ status: 'error', message: 'Publication needs a processed file with at least 5 pages before publishing' })
       return
     }
     await db('publications').where({ id: req.params.id }).update({
@@ -1179,6 +1242,45 @@ async function createApp (): Promise<express.Express> {
     })
     await writeAudit('publication_published', identityKeyOf(req), 'publication', req.params.id, { note: req.body.note })
     res.json({ status: 'success' })
+  })
+
+  api.get('/admin/wallet', requireAdmin, async (_req, res) => {
+    res.json({
+      status: 'success',
+      serverPublicKey: walletBootstrap.publicKey,
+      balanceSats: await getServerWalletBalance()
+    })
+  })
+
+  api.post('/admin/funding', requireAdmin, adminFundingPaymentMiddleware, async (req, res) => {
+    const amountSats = asPositiveInteger(req.body.amountSats, 0)
+    if (amountSats <= 0) {
+      res.status(400).json({ status: 'error', message: 'amountSats must be greater than zero' })
+      return
+    }
+    const paidSats = Number((req as AuthenticatedRequest).payment?.satoshisPaid ?? amountSats)
+    if (paidSats < amountSats) {
+      res.status(402).json({ status: 'error', message: 'Funding payment was not accepted for the requested amount' })
+      return
+    }
+    const fundingId = randomUUID()
+    await db.transaction(async trx => {
+      await trx('ledger_entries').insert({
+        account_type: 'server_wallet',
+        account_identity_key: walletBootstrap.publicKey,
+        amount_sats: paidSats,
+        source_type: 'server_funding',
+        source_id: fundingId,
+        memo: 'Admin-funded server wallet top-up'
+      })
+      await writeAudit('server_wallet_funded', identityKeyOf(req), 'server_wallet', walletBootstrap.publicKey, { amountSats: paidSats, fundingId }, trx)
+    })
+    res.json({
+      status: 'success',
+      fundingId,
+      amountSats: paidSats,
+      balanceSats: await getServerWalletBalance()
+    })
   })
 
   api.get('/admin/settings', requireAdmin, async (_req, res) => {
