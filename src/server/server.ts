@@ -13,7 +13,7 @@ import { createPaymentMiddleware } from '@bsv/payment-express-middleware'
 import { db, getSettings, isAdmin, writeAudit } from './db.js'
 import { asPositiveInteger, splitCommission } from './money.js'
 import { createServerWallet, replacePersistedServerKey } from './wallet.js'
-import { processPublicationFile } from './content.js'
+import { getPublicationDir, processPublicationFile } from './content.js'
 
 const serverDirname = path.dirname(fileURLToPath(import.meta.url))
 const HTTP_PORT = Number(process.env.HTTP_PORT ?? process.env.PORT ?? '3001')
@@ -114,6 +114,18 @@ async function canUseAuthorTools (identityKey: string): Promise<boolean> {
   return settings.mode === 'public_submissions' || await isAdmin(identityKey)
 }
 
+async function canManagePublication (identityKey: string, publication: any): Promise<boolean> {
+  return publication.author_identity_key === identityKey || await isAdmin(identityKey)
+}
+
+async function deletePublication (publicationId: string, actor?: string): Promise<void> {
+  await db.transaction(async trx => {
+    await trx('publications').where({ id: publicationId }).delete()
+    await writeAudit('publication_deleted', actor, 'publication', publicationId, undefined, trx)
+  })
+  await fs.rm(getPublicationDir(publicationId), { recursive: true, force: true })
+}
+
 async function hasValidEntitlement (publicationId: string, pageNumber: number, readerIdentityKey?: string): Promise<boolean> {
   if (readerIdentityKey == null) return false
   const row = await db('page_entitlements')
@@ -158,13 +170,7 @@ async function requireReaderForPaidPage (req: Request, res: Response, next: Next
   }
 }
 
-async function sendPageImage (req: Request, res: Response): Promise<void> {
-  const pageNumber = Number(req.params.pageNumber)
-  const publication = await db('publications').where({ id: req.params.id, status: 'published' }).first()
-  if (publication == null) {
-    res.status(404).json({ status: 'error', message: 'Publication not found' })
-    return
-  }
+async function sendPublicationPageImage (publication: any, pageNumber: number, req: Request, res: Response): Promise<void> {
   if (!Number.isInteger(pageNumber) || pageNumber < 1 || pageNumber > Number(publication.page_count)) {
     res.status(404).json({ status: 'error', message: 'Page not found' })
     return
@@ -231,6 +237,16 @@ async function sendPageImage (req: Request, res: Response): Promise<void> {
   }
   res.setHeader('Cache-Control', 'private, max-age=60')
   res.sendFile(page.image_path)
+}
+
+async function sendPageImage (req: Request, res: Response): Promise<void> {
+  const pageNumber = Number(req.params.pageNumber)
+  const publication = await db('publications').where({ id: req.params.id, status: 'published' }).first()
+  if (publication == null) {
+    res.status(404).json({ status: 'error', message: 'Publication not found' })
+    return
+  }
+  await sendPublicationPageImage(publication, pageNumber, req, res)
 }
 
 function publicPublicationFields (row: any): Record<string, unknown> {
@@ -539,12 +555,27 @@ async function createApp (): Promise<express.Express> {
     if (identityKey == null) throw new Error('auth middleware invariant failed')
     const rows = await db('publications')
       .where({ author_identity_key: identityKey })
+      .whereNot({ status: 'rejected' })
       .orderBy('updated_at', 'desc')
     res.json({
       status: 'success',
       canPublish: await canUseAuthorTools(identityKey),
       publications: rows
     })
+  })
+
+  api.get('/me/ledger', requireAuth, async (req, res) => {
+    const identityKey = identityKeyOf(req)
+    if (identityKey == null) throw new Error('auth middleware invariant failed')
+    const balance = await db('ledger_entries')
+      .where({ account_type: 'author_payable', account_identity_key: identityKey })
+      .sum<{ balance_sats: string | number | null }>({ balance_sats: 'amount_sats' })
+      .first()
+    const payouts = await db('payouts')
+      .where({ author_identity_key: identityKey })
+      .orderBy('created_at', 'desc')
+      .limit(50)
+    res.json({ status: 'success', balanceSats: Number(balance?.balance_sats ?? 0), payouts })
   })
 
   api.post('/me/publications', requireAuth, async (req, res) => {
@@ -572,6 +603,28 @@ async function createApp (): Promise<express.Express> {
     res.json({ status: 'success', publicationId: id })
   })
 
+  api.put('/me/publications/:id', requireAuth, async (req, res) => {
+    const identityKey = identityKeyOf(req)
+    if (identityKey == null) throw new Error('auth middleware invariant failed')
+    const publication = await db('publications').where({ id: req.params.id }).first()
+    if (publication == null || !(await canManagePublication(identityKey, publication))) {
+      res.status(404).json({ status: 'error', message: 'Publication not found' })
+      return
+    }
+    const title = String(req.body.title ?? '').trim()
+    if (title === '') {
+      res.status(400).json({ status: 'error', message: 'title is required' })
+      return
+    }
+    await db('publications').where({ id: publication.id }).update({
+      title,
+      description: req.body.description ?? null,
+      updated_at: db.fn.now()
+    })
+    await writeAudit('publication_updated', identityKey, 'publication', publication.id)
+    res.json({ status: 'success' })
+  })
+
   api.post('/me/publications/:id/files', requireAuth, async (req, res) => {
     const identityKey = identityKeyOf(req)
     if (identityKey == null) throw new Error('auth middleware invariant failed')
@@ -584,6 +637,17 @@ async function createApp (): Promise<express.Express> {
     const tempPath = await writeTempUpload(uploaded)
     const processed = await processAndStorePublicationUpload(publication, identityKey, tempPath, uploaded.originalName, uploaded.mimeType)
     res.json({ status: 'success', pageCount: processed.pageCount })
+  })
+
+  api.get('/me/publications/:id/pages/:pageNumber', requireAuth, async (req, res) => {
+    const identityKey = identityKeyOf(req)
+    if (identityKey == null) throw new Error('auth middleware invariant failed')
+    const publication = await db('publications').where({ id: req.params.id }).first()
+    if (publication == null || !(await canManagePublication(identityKey, publication))) {
+      res.status(404).json({ status: 'error', message: 'Publication not found' })
+      return
+    }
+    await sendPublicationPageImage(publication, Number(req.params.pageNumber), req, res)
   })
 
   api.post('/me/publications/:id/submit', requireAuth, async (req, res) => {
@@ -606,9 +670,40 @@ async function createApp (): Promise<express.Express> {
     res.json({ status: 'success', statusValue: nextStatus })
   })
 
+  api.post('/me/publications/:id/unpublish', requireAuth, async (req, res) => {
+    const identityKey = identityKeyOf(req)
+    if (identityKey == null) throw new Error('auth middleware invariant failed')
+    const publication = await db('publications').where({ id: req.params.id }).first()
+    if (publication == null || !(await canManagePublication(identityKey, publication))) {
+      res.status(404).json({ status: 'error', message: 'Publication not found' })
+      return
+    }
+    await db('publications').where({ id: publication.id }).update({
+      status: 'draft',
+      published_at: null,
+      reviewed_by: null,
+      updated_at: db.fn.now()
+    })
+    await writeAudit('publication_unpublished', identityKey, 'publication', publication.id)
+    res.json({ status: 'success' })
+  })
+
+  api.delete('/me/publications/:id', requireAuth, async (req, res) => {
+    const identityKey = identityKeyOf(req)
+    if (identityKey == null) throw new Error('auth middleware invariant failed')
+    const publication = await db('publications').where({ id: req.params.id }).first()
+    if (publication == null || !(await canManagePublication(identityKey, publication))) {
+      res.status(404).json({ status: 'error', message: 'Publication not found' })
+      return
+    }
+    await deletePublication(publication.id, identityKey)
+    res.json({ status: 'success' })
+  })
+
   api.get('/admin/publications', requireAdmin, async (_req, res) => {
     const rows = await db('publications')
       .join('authors', 'authors.identity_key', 'publications.author_identity_key')
+      .whereNot('publications.status', 'rejected')
       .select('publications.*', 'authors.display_name')
       .orderBy('publications.updated_at', 'desc')
     res.json({ status: 'success', publications: rows })
@@ -675,15 +770,24 @@ async function createApp (): Promise<express.Express> {
 
   api.post('/admin/publications/:id/review', requireAdmin, async (req, res) => {
     const action = req.body.action === 'reject' ? 'reject' : 'publish'
-    const status = action === 'publish' ? 'published' : 'rejected'
+    if (action === 'reject') {
+      const publication = await db('publications').where({ id: req.params.id }).first()
+      if (publication == null) {
+        res.status(404).json({ status: 'error', message: 'Publication not found' })
+        return
+      }
+      await deletePublication(publication.id, identityKeyOf(req))
+      res.json({ status: 'success', deleted: true })
+      return
+    }
     await db('publications').where({ id: req.params.id }).update({
-      status,
+      status: 'published',
       reviewed_by: identityKeyOf(req),
       review_note: req.body.note ?? null,
-      published_at: action === 'publish' ? db.fn.now() : null,
+      published_at: db.fn.now(),
       updated_at: db.fn.now()
     })
-    await writeAudit(`publication_${status}`, identityKeyOf(req), 'publication', req.params.id, { note: req.body.note })
+    await writeAudit('publication_published', identityKeyOf(req), 'publication', req.params.id, { note: req.body.note })
     res.json({ status: 'success' })
   })
 
@@ -815,7 +919,7 @@ async function createApp (): Promise<express.Express> {
 
   const clientRoot = path.resolve(serverDirname, '../../build')
   app.use(express.static(clientRoot))
-  app.get(['/', '/publication/:id', '/read/:id/:pageNumber', '/author', '/admin', '/setup'], (_req, res) => {
+  app.get(['/', '/publication/:id', '/read/:id/:pageNumber', '/author', '/author/read/:id/:pageNumber', '/admin', '/setup'], (_req, res) => {
     res.sendFile(path.join(clientRoot, 'index.html'))
   })
 

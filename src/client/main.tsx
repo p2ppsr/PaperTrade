@@ -131,6 +131,11 @@ async function paidPageFetch (url: string, serverPublicKey?: string): Promise<Re
   })
 }
 
+async function pageFetch (url: string, pageNumber: number, serverPublicKey?: string): Promise<Response> {
+  if (pageNumber === 1) return await fetch(url)
+  return await paidPageFetch(url, serverPublicKey)
+}
+
 function useStatus (): [Status | null, () => Promise<void>] {
   const [status, setStatus] = useState<Status | null>(null)
   const refresh = async (): Promise<void> => {
@@ -229,7 +234,7 @@ function Reader ({ status }: { status: Status | null }): JSX.Element {
     let live = true
     setImageUrl(null)
     setMessage('Loading page...')
-    void paidPageFetch(`${API}/publications/${id}/pages/${currentPage}`, status?.serverPublicKey)
+    void pageFetch(`${API}/publications/${id}/pages/${currentPage}`, currentPage, status?.serverPublicKey)
       .then(async res => {
         if (!res.ok) {
           const json = await res.json().catch(() => ({}))
@@ -258,6 +263,51 @@ function Reader ({ status }: { status: Status | null }): JSX.Element {
       </div>
       {message !== '' && <p className='empty'>{message}</p>}
       {imageUrl != null && <img className='page-image' src={imageUrl} alt={`Page ${currentPage}`} />}
+    </section>
+  )
+}
+
+function AuthorPreview (): JSX.Element {
+  const { id = '', pageNumber = '1' } = useParams()
+  const currentPage = Number(pageNumber)
+  const [imageUrl, setImageUrl] = useState<string | null>(null)
+  const [message, setMessage] = useState('Loading preview...')
+  const navigate = useNavigate()
+
+  useEffect(() => {
+    let live = true
+    setImageUrl(null)
+    setMessage('Loading preview...')
+    void authFetch(`${API}/me/publications/${id}/pages/${currentPage}`)
+      .then(async res => {
+        if (!res.ok) {
+          const json = await res.json().catch(() => ({}))
+          throw new Error(json.message ?? `Preview failed with HTTP ${res.status}`)
+        }
+        return await res.blob()
+      })
+      .then(blob => {
+        if (!live) return
+        setImageUrl(URL.createObjectURL(blob))
+        setMessage('')
+      })
+      .catch(err => {
+        if (!live) return
+        setMessage(err instanceof Error ? err.message : 'Unable to load preview')
+      })
+    return () => { live = false }
+  }, [id, currentPage])
+
+  return (
+    <section className='reader'>
+      <div className='reader-toolbar'>
+        <Link className='button secondary' to='/author'>Back to author</Link>
+        <button type='button' onClick={() => navigate(`/author/read/${id}/${Math.max(1, currentPage - 1)}`)}>Previous</button>
+        <span>Preview page {currentPage}</span>
+        <button type='button' onClick={() => navigate(`/author/read/${id}/${currentPage + 1}`)}>Next</button>
+      </div>
+      {message !== '' && <p className='empty'>{message}</p>}
+      {imageUrl != null && <img className='page-image' src={imageUrl} alt={`Preview page ${currentPage}`} />}
     </section>
   )
 }
@@ -348,17 +398,21 @@ function Author ({ status }: { status: Status | null }): JSX.Element {
   const [avatarFile, setAvatarFile] = useState<File | null>(null)
   const [canPublish, setCanPublish] = useState(false)
   const [publications, setPublications] = useState<any[]>([])
+  const [balanceSats, setBalanceSats] = useState(0)
+  const [payouts, setPayouts] = useState<any[]>([])
   const [title, setTitle] = useState('')
   const [description, setDescription] = useState('')
   const [selectedFile, setSelectedFile] = useState<File | null>(null)
   const [message, setMessage] = useState('')
   const load = async (): Promise<void> => {
-    const [profileRes, publicationsRes] = await Promise.all([
+    const [profileRes, publicationsRes, ledgerRes] = await Promise.all([
       authFetch(`${API}/me/profile`),
-      authFetch(`${API}/me/publications`)
+      authFetch(`${API}/me/publications`),
+      authFetch(`${API}/me/ledger`)
     ])
     const profileJson: { profile?: AuthorProfile, canPublish?: boolean, message?: string } = await profileRes.json()
     const publicationsJson = await publicationsRes.json()
+    const ledgerJson = await ledgerRes.json()
     if (!profileRes.ok) throw new Error(profileJson.message ?? 'Could not load profile')
     const loaded = profileJson.profile
     setProfile({
@@ -369,6 +423,8 @@ function Author ({ status }: { status: Status | null }): JSX.Element {
     setAvatarUrl(loaded?.avatar_url ?? null)
     setCanPublish(Boolean(publicationsJson.canPublish ?? profileJson.canPublish))
     setPublications(publicationsJson.publications ?? [])
+    setBalanceSats(Number(ledgerJson.balanceSats ?? 0))
+    setPayouts(ledgerJson.payouts ?? [])
   }
   useEffect(() => { void load().catch(err => setMessage(err instanceof Error ? err.message : 'Could not load author workspace')) }, [])
   const save = async (): Promise<void> => {
@@ -421,6 +477,35 @@ function Author ({ status }: { status: Status | null }): JSX.Element {
     setSelectedFile(null)
     await load()
   }
+  const updatePublication = async (pub: any): Promise<void> => {
+    const res = await authFetch(`${API}/me/publications/${String(pub.id)}`, {
+      method: 'PUT',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ title: pub.title, description: pub.description })
+    })
+    const json = await res.json()
+    if (!res.ok) throw new Error(json.message ?? 'Could not update publication')
+    await load()
+    setMessage('Publication updated.')
+  }
+  const unpublishPublication = async (id: string): Promise<void> => {
+    const res = await authFetch(`${API}/me/publications/${id}/unpublish`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: '{}'
+    })
+    const json = await res.json()
+    if (!res.ok) throw new Error(json.message ?? 'Could not unpublish publication')
+    await load()
+    setMessage('Publication unpublished.')
+  }
+  const deletePublication = async (id: string): Promise<void> => {
+    const res = await authFetch(`${API}/me/publications/${id}`, { method: 'DELETE' })
+    const json = await res.json()
+    if (!res.ok) throw new Error(json.message ?? 'Could not delete publication')
+    await load()
+    setMessage('Publication deleted.')
+  }
   return (
     <section className='surface'>
       <header className='page-head'>
@@ -462,12 +547,31 @@ function Author ({ status }: { status: Status | null }): JSX.Element {
       <section className='tool-panel publication-list'>
         <h2>Your publications</h2>
         {publications.map(pub => (
-          <div className='row' key={pub.id}>
-            <span>{pub.title}</span>
-            <span>{pub.status} · {pub.page_count} pages</span>
+          <div className='publication-editor' key={pub.id}>
+            <label>Title <input value={pub.title ?? ''} onChange={e => setPublications(items => items.map(item => item.id === pub.id ? { ...item, title: e.target.value } : item))} /></label>
+            <label>Description <textarea value={pub.description ?? ''} onChange={e => setPublications(items => items.map(item => item.id === pub.id ? { ...item, description: e.target.value } : item))} /></label>
+            <div className='row'>
+              <span>{pub.status} · {pub.page_count} pages</span>
+              {Number(pub.page_count) > 0 && <Link className='button secondary' to={`/author/read/${String(pub.id)}/1`}>Preview</Link>}
+              <button type='button' onClick={() => { void updatePublication(pub).catch(err => setMessage(err.message)) }}>Save</button>
+              {pub.status === 'published' && <button type='button' onClick={() => { void unpublishPublication(pub.id).catch(err => setMessage(err.message)) }}>Unpublish</button>}
+              <button type='button' className='danger' onClick={() => { void deletePublication(pub.id).catch(err => setMessage(err.message)) }}>Delete</button>
+            </div>
           </div>
         ))}
         {publications.length === 0 && <p className='empty'>No drafts or publications yet.</p>}
+      </section>
+      <section className='tool-panel publication-list'>
+        <h2>Payouts</h2>
+        <p>Current author balance: {balanceSats} sats</p>
+        {payouts.map(payout => (
+          <div className='row' key={payout.id}>
+            <span>{payout.amount_sats} sats</span>
+            <span>{payout.status}</span>
+            <span>{payout.destination_type}</span>
+          </div>
+        ))}
+        {payouts.length === 0 && <p className='empty'>No payouts recorded yet. Admins initiate payouts from the Admin tab.</p>}
       </section>
     </section>
   )
@@ -476,10 +580,26 @@ function Author ({ status }: { status: Status | null }): JSX.Element {
 function Admin (): JSX.Element {
   const [message, setMessage] = useState('')
   const [publications, setPublications] = useState<any[]>([])
+  const [authorBalances, setAuthorBalances] = useState<any[]>([])
+  const [payouts, setPayouts] = useState<any[]>([])
+  const [payoutForm, setPayoutForm] = useState({
+    authorIdentityKey: '',
+    amountSats: 0,
+    destinationType: 'legacy_address',
+    destination: ''
+  })
   const refresh = async (): Promise<void> => {
-    const res = await authFetch(`${API}/admin/publications`)
-    const json = await res.json()
-    setPublications(json.publications ?? [])
+    const [pubRes, ledgerRes, paymentRes] = await Promise.all([
+      authFetch(`${API}/admin/publications`),
+      authFetch(`${API}/admin/ledger`),
+      authFetch(`${API}/admin/payments`)
+    ])
+    const pubJson = await pubRes.json()
+    const ledgerJson = await ledgerRes.json()
+    const paymentJson = await paymentRes.json()
+    setPublications(pubJson.publications ?? [])
+    setAuthorBalances(ledgerJson.authorBalances ?? [])
+    setPayouts(paymentJson.payouts ?? [])
   }
   useEffect(() => { void refresh().catch(() => undefined) }, [])
   const review = async (id: string, action: 'publish' | 'reject'): Promise<void> => {
@@ -491,6 +611,18 @@ function Admin (): JSX.Element {
     if (!res.ok) throw new Error('Review failed')
     await refresh()
     setMessage(action === 'publish' ? 'Publication published.' : 'Publication rejected.')
+  }
+  const createPayout = async (): Promise<void> => {
+    const res = await authFetch(`${API}/admin/payouts`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(payoutForm)
+    })
+    const json: { message?: string, payoutStatus?: string, failureReason?: string | null } = await res.json()
+    if (!res.ok) throw new Error(json.message ?? 'Could not create payout')
+    await refresh()
+    const payoutStatus = json.payoutStatus ?? 'created'
+    setMessage(payoutStatus === 'failed' ? `Payout failed: ${json.failureReason ?? 'unknown error'}` : `Payout ${payoutStatus}.`)
   }
   return (
     <section className='surface'>
@@ -514,6 +646,42 @@ function Admin (): JSX.Element {
         ))}
         {publications.length === 0 && <p className='empty'>No publications to review yet.</p>}
       </section>
+      <section className='tool-panel publication-list'>
+        <h2>Payouts</h2>
+        <div className='admin-grid compact'>
+          <form onSubmit={e => { e.preventDefault(); void createPayout().catch(err => setMessage(err.message)) }}>
+            <label>Author identity key <input value={payoutForm.authorIdentityKey} onChange={e => setPayoutForm({ ...payoutForm, authorIdentityKey: e.target.value })} /></label>
+            <label>Amount in sats <input type='number' min='0' value={payoutForm.amountSats} onChange={e => setPayoutForm({ ...payoutForm, amountSats: Number(e.target.value) })} /></label>
+            <label>Destination type
+              <select value={payoutForm.destinationType} onChange={e => setPayoutForm({ ...payoutForm, destinationType: e.target.value })}>
+                <option value='legacy_address'>Legacy BSV address</option>
+                <option value='brc100_identity'>BRC100 identity key</option>
+              </select>
+            </label>
+            <label>Destination <input value={payoutForm.destination} onChange={e => setPayoutForm({ ...payoutForm, destination: e.target.value })} /></label>
+            <button className='button' type='submit'>Create payout</button>
+          </form>
+          <div>
+            <h2>Author balances</h2>
+            {authorBalances.map(balance => (
+              <button className='balance-row' type='button' key={balance.account_identity_key} onClick={() => setPayoutForm({ ...payoutForm, authorIdentityKey: balance.account_identity_key, amountSats: Number(balance.balance_sats ?? 0) })}>
+                <span>{balance.account_identity_key}</span>
+                <strong>{Number(balance.balance_sats ?? 0)} sats</strong>
+              </button>
+            ))}
+            {authorBalances.length === 0 && <p className='empty'>No author balances yet.</p>}
+          </div>
+        </div>
+        <h2>Payout history</h2>
+        {payouts.map(payout => (
+          <div className='row' key={payout.id}>
+            <span>{payout.amount_sats} sats</span>
+            <span>{payout.status}</span>
+            <span>{payout.destination_type}</span>
+          </div>
+        ))}
+        {payouts.length === 0 && <p className='empty'>No payouts have been created yet.</p>}
+      </section>
       {message !== '' && <p className='notice'>{message}</p>}
     </section>
   )
@@ -533,6 +701,7 @@ function App (): JSX.Element {
           <Route path='/publication/:id' element={<PublicationDetail />} />
           <Route path='/read/:id/:pageNumber' element={<Reader status={status} />} />
           <Route path='/author' element={<Author status={status} />} />
+          <Route path='/author/read/:id/:pageNumber' element={<AuthorPreview />} />
           <Route path='/admin' element={<Admin />} />
           <Route path='/setup' element={<Setup status={status} refresh={refresh} />} />
         </Routes>

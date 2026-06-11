@@ -36,6 +36,10 @@ button.secondary,
   background: #5c6570;
 }
 
+button.danger {
+  background: #9f342e;
+}
+
 button:disabled,
 input:disabled,
 textarea:disabled {
@@ -233,6 +237,10 @@ h1 {
   grid-template-columns: minmax(320px, 420px) 1fr;
 }
 
+.admin-grid.compact {
+  grid-template-columns: minmax(280px, 380px) 1fr;
+}
+
 .wizard-grid {
   display: grid;
   gap: 18px;
@@ -300,6 +308,30 @@ h1 {
 
 .publication-list {
   margin-top: 18px;
+}
+
+.publication-editor {
+  border-bottom: 1px solid #ece8dd;
+  display: grid;
+  gap: 8px;
+  padding: 14px 0;
+}
+
+.balance-row {
+  align-items: center;
+  background: #f8fafb;
+  border: 1px solid #d6dde2;
+  color: #20231f;
+  display: grid;
+  gap: 8px;
+  grid-template-columns: 1fr auto;
+  height: auto;
+  justify-items: stretch;
+  margin-bottom: 8px;
+  overflow-wrap: anywhere;
+  padding: 10px;
+  text-align: left;
+  width: 100%;
 }
 
 .row {
