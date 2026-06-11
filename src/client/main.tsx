@@ -41,6 +41,7 @@ const USERCOM_SOURCE = 'papertrade'
 const USERCOM_SUBMIT_ENDPOINT = 'https://usercom.babbage.systems/submit'
 const USERCOM_SIGNAL_ENDPOINT = 'https://usercom.babbage.systems/signal'
 const GET_METANET_URL = 'https://getmetanet.com'
+const WALLET_TIMEOUT_MS = 20000
 
 function getWallet (): WalletClient {
   return new WalletClient('auto', WALLET_ORIGIN)
@@ -84,8 +85,22 @@ async function authFetch (url: string, init?: RequestInit): Promise<Response> {
   return await fetcher.fetch(absoluteRequestUrl(url), init as any)
 }
 
+async function withWalletTimeout<T> (promise: Promise<T>, action: string): Promise<T> {
+  let timeoutId: number | undefined
+  const timeout = new Promise<never>((_resolve, reject) => {
+    timeoutId = window.setTimeout(() => {
+      reject(new Error(`Wallet request timed out while trying to ${action}. Check that your BRC100 wallet is open and approve the request, then retry.`))
+    }, WALLET_TIMEOUT_MS)
+  })
+  try {
+    return await Promise.race([promise, timeout])
+  } finally {
+    if (timeoutId != null) window.clearTimeout(timeoutId)
+  }
+}
+
 async function paidPageFetch (url: string): Promise<Response> {
-  return await authFetch(url)
+  return await withWalletTimeout(authFetch(url), 'pay for this page')
 }
 
 async function pageFetch (url: string, pageNumber: number): Promise<Response> {
@@ -520,9 +535,9 @@ function Author ({ status }: { status: Status | null }): JSX.Element {
   const [message, setMessage] = useState('')
   const load = async (): Promise<void> => {
     const [profileRes, publicationsRes, ledgerRes] = await Promise.all([
-      authFetch(`${API}/me/profile`),
-      authFetch(`${API}/me/publications`),
-      authFetch(`${API}/me/ledger`)
+      withWalletTimeout(authFetch(`${API}/me/profile`), 'load your author profile'),
+      withWalletTimeout(authFetch(`${API}/me/publications`), 'load your publications'),
+      withWalletTimeout(authFetch(`${API}/me/ledger`), 'load your author ledger')
     ])
     const profileJson: { profile?: AuthorProfile, canPublish?: boolean, message?: string } = await profileRes.json()
     const publicationsJson = await publicationsRes.json()
@@ -713,9 +728,9 @@ function Admin (): JSX.Element {
   })
   const refresh = async (): Promise<void> => {
     const [pubRes, ledgerRes, paymentRes] = await Promise.all([
-      authFetch(`${API}/admin/publications`),
-      authFetch(`${API}/admin/ledger`),
-      authFetch(`${API}/admin/payments`)
+      withWalletTimeout(authFetch(`${API}/admin/publications`), 'load publication review'),
+      withWalletTimeout(authFetch(`${API}/admin/ledger`), 'load the ledger'),
+      withWalletTimeout(authFetch(`${API}/admin/payments`), 'load payments')
     ])
     const pubJson = await pubRes.json()
     const ledgerJson = await ledgerRes.json()
