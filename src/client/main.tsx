@@ -1,8 +1,8 @@
 import React, { useEffect, useMemo, useState } from 'react'
 import { createRoot } from 'react-dom/client'
-import { BrowserRouter, Link, Route, Routes, useNavigate, useParams } from 'react-router-dom'
-import { AuthFetch, P2PKH, PublicKey, Utils, WalletClient } from '@bsv/sdk'
-import { BookOpen, Check, FileText, Home, Library, Settings, Upload, User } from 'lucide-react'
+import { BrowserRouter, Link, Route, Routes, useLocation, useNavigate, useParams } from 'react-router-dom'
+import { AuthFetch, WalletClient } from '@bsv/sdk'
+import { BookOpen, Check, ExternalLink, FileText, Home, Library, MessageCircle, Settings, Upload, User } from 'lucide-react'
 import './styles.css'
 
 interface Status {
@@ -37,6 +37,10 @@ interface AuthorProfile {
 
 const API = '/api'
 const WALLET_ORIGIN = (import.meta as any).env?.VITE_WALLET_ORIGIN ?? 'localhost:3321'
+const USERCOM_SOURCE = 'papertrade'
+const USERCOM_SUBMIT_ENDPOINT = 'https://usercom.babbage.systems/submit'
+const USERCOM_SIGNAL_ENDPOINT = 'https://usercom.babbage.systems/signal'
+const GET_METANET_URL = 'https://getmetanet.com'
 
 function getWallet (): WalletClient {
   return new WalletClient('auto', WALLET_ORIGIN)
@@ -44,16 +48,6 @@ function getWallet (): WalletClient {
 
 function absoluteRequestUrl (url: string): string {
   return new URL(url, window.location.origin).toString()
-}
-
-function asBase64 (bytes: number[]): string {
-  return Utils.toBase64(bytes)
-}
-
-function randomBase64 (length: number): string {
-  const bytes = new Uint8Array(length)
-  crypto.getRandomValues(bytes)
-  return btoa(String.fromCharCode(...bytes))
 }
 
 async function fileToBase64 (file: File): Promise<string> {
@@ -90,50 +84,158 @@ async function authFetch (url: string, init?: RequestInit): Promise<Response> {
   return await fetcher.fetch(absoluteRequestUrl(url), init as any)
 }
 
-async function paidPageFetch (url: string, serverPublicKey?: string): Promise<Response> {
-  const wallet = getWallet()
-  const fetcher = new AuthFetch(wallet)
-  const requestUrl = absoluteRequestUrl(url)
-  const first = await fetcher.fetch(requestUrl)
-  if (first.status !== 402) return first
-  if (serverPublicKey == null || serverPublicKey === '') throw new Error('Server payment key is not available')
-  const sats = Number(first.headers.get('x-bsv-payment-satoshis-required') ?? '0')
-  const derivationPrefix = first.headers.get('x-bsv-payment-derivation-prefix') ?? ''
-  if (!Number.isInteger(sats) || sats <= 0 || derivationPrefix === '') throw new Error('Invalid payment challenge')
-
-  const derivationSuffix = randomBase64(8)
-  const { publicKey: derivedKey } = await wallet.getPublicKey({
-    protocolID: [2, '3241645161d8'],
-    keyID: `${derivationPrefix} ${derivationSuffix}`,
-    counterparty: serverPublicKey,
-    forSelf: false
-  } as any)
-  const lockingScript = new P2PKH().lock(PublicKey.fromString(derivedKey).toAddress()).toHex()
-  const action = await wallet.createAction({
-    description: `PaperTrade page payment ${sats} sats`,
-    outputs: [{
-      lockingScript,
-      satoshis: sats,
-      outputDescription: 'PaperTrade paid page',
-      customInstructions: JSON.stringify({ derivationPrefix, derivationSuffix, payee: serverPublicKey })
-    }],
-    options: { randomizeOutputs: false, acceptDelayedBroadcast: false }
-  } as any)
-  if (!Array.isArray(action.tx)) throw new Error('Wallet did not return a transaction')
-  return await fetcher.fetch(requestUrl, {
-    headers: {
-      'x-bsv-payment': JSON.stringify({
-        derivationPrefix,
-        derivationSuffix,
-        transaction: asBase64(action.tx)
-      })
-    }
-  })
+async function paidPageFetch (url: string): Promise<Response> {
+  return await authFetch(url)
 }
 
-async function pageFetch (url: string, pageNumber: number, serverPublicKey?: string): Promise<Response> {
+async function pageFetch (url: string, pageNumber: number): Promise<Response> {
   if (pageNumber === 1) return await fetch(url)
-  return await paidPageFetch(url, serverPublicKey)
+  return await paidPageFetch(url)
+}
+
+async function responseToPngBlob (res: Response, fallbackMessage: string): Promise<Blob> {
+  if (!res.ok) {
+    const json = await res.json().catch(() => ({}))
+    throw new Error(json.message ?? json.description ?? `${fallbackMessage} with HTTP ${res.status}`)
+  }
+  const blob = await res.blob()
+  const header = new Uint8Array(await blob.slice(0, 8).arrayBuffer())
+  const isPng = header.length >= 8 &&
+    header[0] === 0x89 &&
+    header[1] === 0x50 &&
+    header[2] === 0x4e &&
+    header[3] === 0x47 &&
+    header[4] === 0x0d &&
+    header[5] === 0x0a &&
+    header[6] === 0x1a &&
+    header[7] === 0x0a
+  if (!isPng) throw new Error(`${fallbackMessage}: server did not return a rendered page image`)
+  return blob
+}
+
+function randomId (): string {
+  const bytes = new Uint8Array(12)
+  crypto.getRandomValues(bytes)
+  return Array.from(bytes).map(byte => byte.toString(16).padStart(2, '0')).join('')
+}
+
+function getStoredId (storage: Storage, key: string): string {
+  const existing = storage.getItem(key)
+  if (existing != null && existing !== '') return existing
+  const id = randomId()
+  storage.setItem(key, id)
+  return id
+}
+
+function tagValue (value: string): string {
+  return value.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '').slice(0, 64)
+}
+
+function cleanContext (context: Record<string, unknown>): Record<string, unknown> {
+  return Object.fromEntries(Object.entries(context).filter(([, value]) => value !== undefined && value !== null && value !== ''))
+}
+
+function usercomMetadata ({ surface, tags = [], context = {} }: { surface: string, tags?: string[], context?: Record<string, unknown> }): Record<string, unknown> {
+  return {
+    source: USERCOM_SOURCE,
+    surface,
+    url: window.location.href,
+    path: `${window.location.pathname}${window.location.search}`,
+    referrer: document.referrer === '' ? undefined : document.referrer,
+    anonymousId: getStoredId(window.localStorage, 'papertrade_anonymous_id'),
+    sessionId: getStoredId(window.sessionStorage, 'papertrade_session_id'),
+    tags: [`surface:${tagValue(surface)}`, ...tags].filter(Boolean),
+    context: cleanContext(context)
+  }
+}
+
+function postSignal (name: string, metadata: Record<string, unknown>): void {
+  try {
+    void fetch(USERCOM_SIGNAL_ENDPOINT, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ name, ...metadata }),
+      keepalive: true
+    }).catch(() => undefined)
+  } catch {}
+}
+
+function friendlyErrorMessage (err: unknown, fallback: string): string {
+  const raw = err instanceof Error ? err.message : typeof err === 'string' ? err : fallback
+  const lower = raw.toLowerCase()
+  if (lower.includes('wallet') || lower.includes('communication substrate') || lower.includes('auth') || lower.includes('identity')) {
+    return `${raw}. PaperTrade needs a BRC100 wallet for protected actions and paid pages.`
+  }
+  return raw === '' ? fallback : raw
+}
+
+function WalletHelp ({ message }: { message: string }): JSX.Element | null {
+  const lower = message.toLowerCase()
+  if (!(lower.includes('wallet') || lower.includes('brc100') || lower.includes('payment') || lower.includes('auth'))) return null
+  return (
+    <div className='wallet-help'>
+      <div>
+        <strong>BRC100 wallet required</strong>
+        <p>Install or open a Metanet-compatible wallet, then retry this action.</p>
+      </div>
+      <a className='button secondary' href={GET_METANET_URL} target='_blank' rel='noreferrer'><ExternalLink size={18} /> Get Metanet</a>
+    </div>
+  )
+}
+
+function FeedbackPanel ({ surface }: { surface: string }): JSX.Element {
+  const [form, setForm] = useState({ name: '', email: '', feedback: '' })
+  const [message, setMessage] = useState('')
+  const submit = async (): Promise<void> => {
+    const feedback = form.feedback.trim()
+    if (feedback === '') {
+      setMessage('Tell us what happened before sending feedback.')
+      return
+    }
+    const metadata = usercomMetadata({ surface, tags: ['feedback'], context: { surface } })
+    const res = await fetch(USERCOM_SUBMIT_ENDPOINT, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        type: 'feedback',
+        name: form.name.trim() === '' ? undefined : form.name.trim(),
+        email: form.email.trim() === '' ? undefined : form.email.trim(),
+        subject: `PaperTrade feedback: ${surface}`,
+        feedback,
+        ...metadata
+      })
+    })
+    if (!res.ok) throw new Error('Feedback could not be sent')
+    postSignal('feedback.submitted', metadata)
+    setForm({ name: '', email: '', feedback: '' })
+    setMessage('Feedback sent.')
+  }
+  return (
+    <section className='feedback-panel'>
+      <h2><MessageCircle size={18} /> Feedback</h2>
+      <form onSubmit={e => { e.preventDefault(); void submit().catch(err => setMessage(err instanceof Error ? err.message : 'Feedback could not be sent')) }}>
+        <div className='feedback-grid'>
+          <label>Name <input value={form.name} onChange={e => setForm({ ...form, name: e.target.value })} /></label>
+          <label>Email <input type='email' value={form.email} onChange={e => setForm({ ...form, email: e.target.value })} /></label>
+        </div>
+        <label>Message <textarea value={form.feedback} onChange={e => setForm({ ...form, feedback: e.target.value })} /></label>
+        <button className='button' type='submit'>Send feedback</button>
+      </form>
+      {message !== '' && <p className='notice compact'>{message}</p>}
+    </section>
+  )
+}
+
+function Analytics ({ status }: { status: Status | null }): null {
+  const location = useLocation()
+  useEffect(() => {
+    postSignal('page.view', usercomMetadata({
+      surface: 'app',
+      tags: [`route:${tagValue(location.pathname)}`, status?.setupComplete === true ? 'setup:complete' : 'setup:pending', status?.mode != null ? `mode:${status.mode}` : 'mode:unknown'],
+      context: { setupComplete: status?.setupComplete, mode: status?.mode }
+    }))
+  }, [location.pathname, location.search, status?.setupComplete, status?.mode])
+  return null
 }
 
 function useStatus (): [Status | null, () => Promise<void>] {
@@ -170,15 +272,20 @@ function Shell ({ children, status }: { children: React.ReactNode, status: Statu
 function Newsstand (): JSX.Element {
   const [publications, setPublications] = useState<Publication[]>([])
   useEffect(() => {
-    void fetch(`${API}/publications`).then(async res => await res.json()).then(json => setPublications(json.publications ?? []))
+    void fetch(`${API}/publications`).then(async res => await res.json()).then(json => {
+      const rows = json.publications ?? []
+      setPublications(rows)
+      postSignal('newsstand.loaded', usercomMetadata({ surface: 'newsstand', tags: ['reader'], context: { publicationCount: rows.length } }))
+    })
   }, [])
   return (
     <section className='surface'>
-      <header className='page-head'>
+      <header className='page-head newsstand-head'>
         <div>
           <h1>Newsstand</h1>
-          <p>Read the first page free. Pay per page after that.</p>
+          <p>Read page 1 free. Pay per page after that with a BRC100 wallet.</p>
         </div>
+        <a className='button secondary' href={GET_METANET_URL} target='_blank' rel='noreferrer'><ExternalLink size={18} /> Get Metanet</a>
       </header>
       <div className='publication-grid'>
         {publications.map(pub => (
@@ -195,6 +302,7 @@ function Newsstand (): JSX.Element {
         ))}
         {publications.length === 0 && <p className='empty'>No publications are live yet.</p>}
       </div>
+      <FeedbackPanel surface='newsstand' />
     </section>
   )
 }
@@ -203,7 +311,11 @@ function PublicationDetail (): JSX.Element {
   const { id = '' } = useParams()
   const [publication, setPublication] = useState<Publication | null>(null)
   useEffect(() => {
-    void fetch(`${API}/publications/${id}`).then(async res => await res.json()).then(json => setPublication(json.publication ?? null))
+    void fetch(`${API}/publications/${id}`).then(async res => await res.json()).then(json => {
+      const loaded = json.publication ?? null
+      setPublication(loaded)
+      if (loaded != null) postSignal('publication.view', usercomMetadata({ surface: 'publication', tags: ['reader'], context: { publicationId: id, pageCount: loaded.pageCount } }))
+    })
   }, [id])
   if (publication == null) return <section className='surface'><p>Loading publication...</p></section>
   return (
@@ -234,25 +346,26 @@ function Reader ({ status }: { status: Status | null }): JSX.Element {
     let live = true
     setImageUrl(null)
     setMessage('Loading page...')
-    void pageFetch(`${API}/publications/${id}/pages/${currentPage}`, currentPage, status?.serverPublicKey)
-      .then(async res => {
-        if (!res.ok) {
-          const json = await res.json().catch(() => ({}))
-          throw new Error(json.message ?? `Page request failed with HTTP ${res.status}`)
-        }
-        return await res.blob()
-      })
+    void pageFetch(`${API}/publications/${id}/pages/${currentPage}`, currentPage)
+      .then(async res => await responseToPngBlob(res, 'Page request failed'))
       .then(blob => {
         if (!live) return
         setImageUrl(URL.createObjectURL(blob))
         setMessage('')
+        postSignal('reader.page_loaded', usercomMetadata({
+          surface: 'reader',
+          tags: [currentPage === 1 ? 'page:first_free' : 'page:paid'],
+          context: { publicationId: id, pageNumber: currentPage }
+        }))
       })
       .catch(err => {
         if (!live) return
-        setMessage(err instanceof Error ? err.message : 'Unable to load page')
+        const nextMessage = friendlyErrorMessage(err, 'Unable to load page')
+        setMessage(nextMessage)
+        postSignal('reader.page_failed', usercomMetadata({ surface: 'reader', tags: ['error'], context: { publicationId: id, pageNumber: currentPage, message: nextMessage } }))
       })
     return () => { live = false }
-  }, [id, currentPage, status?.serverPublicKey])
+  }, [id, currentPage])
 
   return (
     <section className='reader'>
@@ -262,6 +375,7 @@ function Reader ({ status }: { status: Status | null }): JSX.Element {
         <button type='button' onClick={() => navigate(`/read/${id}/${currentPage + 1}`)}>Next</button>
       </div>
       {message !== '' && <p className='empty'>{message}</p>}
+      <WalletHelp message={message} />
       {imageUrl != null && <img className='page-image' src={imageUrl} alt={`Page ${currentPage}`} />}
     </section>
   )
@@ -279,21 +393,18 @@ function AuthorPreview (): JSX.Element {
     setImageUrl(null)
     setMessage('Loading preview...')
     void authFetch(`${API}/me/publications/${id}/pages/${currentPage}`)
-      .then(async res => {
-        if (!res.ok) {
-          const json = await res.json().catch(() => ({}))
-          throw new Error(json.message ?? `Preview failed with HTTP ${res.status}`)
-        }
-        return await res.blob()
-      })
+      .then(async res => await responseToPngBlob(res, 'Preview failed'))
       .then(blob => {
         if (!live) return
         setImageUrl(URL.createObjectURL(blob))
         setMessage('')
+        postSignal('author.preview_loaded', usercomMetadata({ surface: 'author_preview', tags: ['author'], context: { publicationId: id, pageNumber: currentPage } }))
       })
       .catch(err => {
         if (!live) return
-        setMessage(err instanceof Error ? err.message : 'Unable to load preview')
+        const nextMessage = friendlyErrorMessage(err, 'Unable to load preview')
+        setMessage(nextMessage)
+        postSignal('author.preview_failed', usercomMetadata({ surface: 'author_preview', tags: ['error'], context: { publicationId: id, pageNumber: currentPage, message: nextMessage } }))
       })
     return () => { live = false }
   }, [id, currentPage])
@@ -307,6 +418,7 @@ function AuthorPreview (): JSX.Element {
         <button type='button' onClick={() => navigate(`/author/read/${id}/${currentPage + 1}`)}>Next</button>
       </div>
       {message !== '' && <p className='empty'>{message}</p>}
+      <WalletHelp message={message} />
       {imageUrl != null && <img className='page-image' src={imageUrl} alt={`Preview page ${currentPage}`} />}
     </section>
   )
@@ -344,6 +456,7 @@ function Setup ({ status, refresh }: { status: Status | null, refresh: () => Pro
     if (!res.ok) throw new Error(json.message ?? 'Setup failed')
     await refresh()
     setMessage('Setup saved.')
+    postSignal('setup.saved', usercomMetadata({ surface: 'setup', tags: [`mode:${form.mode}`], context: { mode: form.mode, displayUnit: form.displayUnit, pricePerPageSats: form.pricePerPageSats } }))
   }
   return (
     <section className='surface setup-flow'>
@@ -387,7 +500,8 @@ function Setup ({ status, refresh }: { status: Status | null, refresh: () => Pro
         </section>
       </div>
       <button className='button primary-action' type='button' onClick={() => { void submit().catch(err => setMessage(err.message)) }}><Check size={18} /> Save setup</button>
-      {message !== '' && <p>{message}</p>}
+      {message !== '' && <p className='notice'>{message}</p>}
+      <WalletHelp message={message} />
     </section>
   )
 }
@@ -426,7 +540,7 @@ function Author ({ status }: { status: Status | null }): JSX.Element {
     setBalanceSats(Number(ledgerJson.balanceSats ?? 0))
     setPayouts(ledgerJson.payouts ?? [])
   }
-  useEffect(() => { void load().catch(err => setMessage(err instanceof Error ? err.message : 'Could not load author workspace')) }, [])
+  useEffect(() => { void load().catch(err => setMessage(friendlyErrorMessage(err, 'Could not load author workspace'))) }, [])
   const save = async (): Promise<void> => {
     const res = await authFetch(`${API}/me/profile`, {
       method: 'PUT',
@@ -448,6 +562,7 @@ function Author ({ status }: { status: Status | null }): JSX.Element {
     }
     await load()
     setMessage('Profile saved.')
+    postSignal('author.profile_saved', usercomMetadata({ surface: 'author', tags: ['author'], context: { hasAvatar: avatarUrl != null || avatarFile != null, displayUnit: profile.displayUnit } }))
   }
   const createAndUpload = async (): Promise<void> => {
     const create = await authFetch(`${API}/me/publications`, {
@@ -469,8 +584,10 @@ function Author ({ status }: { status: Status | null }): JSX.Element {
       const submitted = await submit.json()
       if (!submit.ok) throw new Error(submitted.message ?? 'Could not submit publication')
       setMessage(submitted.statusValue === 'published' ? 'Publication uploaded and published.' : 'Publication uploaded and submitted for review.')
+      postSignal('author.publication_uploaded', usercomMetadata({ surface: 'author', tags: [`status:${String(submitted.statusValue ?? 'draft')}`], context: { publicationId: created.publicationId } }))
     } else {
       setMessage('Draft created. Add a file before submitting.')
+      postSignal('author.publication_created', usercomMetadata({ surface: 'author', tags: ['draft'], context: { publicationId: created.publicationId } }))
     }
     setTitle('')
     setDescription('')
@@ -487,6 +604,7 @@ function Author ({ status }: { status: Status | null }): JSX.Element {
     if (!res.ok) throw new Error(json.message ?? 'Could not update publication')
     await load()
     setMessage('Publication updated.')
+    postSignal('author.publication_updated', usercomMetadata({ surface: 'author', tags: ['author'], context: { publicationId: String(pub.id) } }))
   }
   const unpublishPublication = async (id: string): Promise<void> => {
     const res = await authFetch(`${API}/me/publications/${id}/unpublish`, {
@@ -498,6 +616,7 @@ function Author ({ status }: { status: Status | null }): JSX.Element {
     if (!res.ok) throw new Error(json.message ?? 'Could not unpublish publication')
     await load()
     setMessage('Publication unpublished.')
+    postSignal('author.publication_unpublished', usercomMetadata({ surface: 'author', tags: ['author'], context: { publicationId: id } }))
   }
   const deletePublication = async (id: string): Promise<void> => {
     const res = await authFetch(`${API}/me/publications/${id}`, { method: 'DELETE' })
@@ -505,6 +624,7 @@ function Author ({ status }: { status: Status | null }): JSX.Element {
     if (!res.ok) throw new Error(json.message ?? 'Could not delete publication')
     await load()
     setMessage('Publication deleted.')
+    postSignal('author.publication_deleted', usercomMetadata({ surface: 'author', tags: ['author'], context: { publicationId: id } }))
   }
   return (
     <section className='surface'>
@@ -544,6 +664,7 @@ function Author ({ status }: { status: Status | null }): JSX.Element {
         </section>
       </div>
       {message !== '' && <p className='notice'>{message}</p>}
+      <WalletHelp message={message} />
       <section className='tool-panel publication-list'>
         <h2>Your publications</h2>
         {publications.map(pub => (
@@ -563,7 +684,7 @@ function Author ({ status }: { status: Status | null }): JSX.Element {
       </section>
       <section className='tool-panel publication-list'>
         <h2>Payouts</h2>
-        <p>Current author balance: {balanceSats} sats</p>
+        <p>Current author balance: {balanceSats} sats. Admins create payouts from author balances in the Admin tab.</p>
         {payouts.map(payout => (
           <div className='row' key={payout.id}>
             <span>{payout.amount_sats} sats</span>
@@ -611,6 +732,7 @@ function Admin (): JSX.Element {
     if (!res.ok) throw new Error('Review failed')
     await refresh()
     setMessage(action === 'publish' ? 'Publication published.' : 'Publication rejected.')
+    postSignal('admin.publication_reviewed', usercomMetadata({ surface: 'admin', tags: [`action:${action}`], context: { publicationId: id } }))
   }
   const createPayout = async (): Promise<void> => {
     const res = await authFetch(`${API}/admin/payouts`, {
@@ -623,6 +745,7 @@ function Admin (): JSX.Element {
     await refresh()
     const payoutStatus = json.payoutStatus ?? 'created'
     setMessage(payoutStatus === 'failed' ? `Payout failed: ${json.failureReason ?? 'unknown error'}` : `Payout ${payoutStatus}.`)
+    postSignal('admin.payout_created', usercomMetadata({ surface: 'admin', tags: [`status:${payoutStatus}`], context: { authorIdentityKey: payoutForm.authorIdentityKey, amountSats: payoutForm.amountSats, destinationType: payoutForm.destinationType } }))
   }
   return (
     <section className='surface'>
@@ -648,6 +771,7 @@ function Admin (): JSX.Element {
       </section>
       <section className='tool-panel publication-list'>
         <h2>Payouts</h2>
+        <p className='hint'>Select an author balance to fill the payout form. Failed payouts remain in history and do not reduce the author balance.</p>
         <div className='admin-grid compact'>
           <form onSubmit={e => { e.preventDefault(); void createPayout().catch(err => setMessage(err.message)) }}>
             <label>Author identity key <input value={payoutForm.authorIdentityKey} onChange={e => setPayoutForm({ ...payoutForm, authorIdentityKey: e.target.value })} /></label>
@@ -683,29 +807,38 @@ function Admin (): JSX.Element {
         {payouts.length === 0 && <p className='empty'>No payouts have been created yet.</p>}
       </section>
       {message !== '' && <p className='notice'>{message}</p>}
+      <WalletHelp message={message} />
     </section>
+  )
+}
+
+function AppRoutes ({ status, refresh }: { status: Status | null, refresh: () => Promise<void> }): JSX.Element {
+  const location = useLocation()
+  const needsSetup = useMemo(() => status != null && !status.setupComplete, [status])
+  return (
+    <Shell status={status}>
+      <Analytics status={status} />
+      {needsSetup && location.pathname !== '/setup' && (
+        <div className='setup-banner'><Link to='/setup'>Complete first-run setup</Link></div>
+      )}
+      <Routes>
+        <Route path='/' element={<Newsstand />} />
+        <Route path='/publication/:id' element={<PublicationDetail />} />
+        <Route path='/read/:id/:pageNumber' element={<Reader status={status} />} />
+        <Route path='/author' element={<Author status={status} />} />
+        <Route path='/author/read/:id/:pageNumber' element={<AuthorPreview />} />
+        <Route path='/admin' element={<Admin />} />
+        <Route path='/setup' element={<Setup status={status} refresh={refresh} />} />
+      </Routes>
+    </Shell>
   )
 }
 
 function App (): JSX.Element {
   const [status, refresh] = useStatus()
-  const needsSetup = useMemo(() => status != null && !status.setupComplete, [status])
   return (
     <BrowserRouter>
-      <Shell status={status}>
-        {needsSetup && location.pathname !== '/setup' && (
-          <div className='setup-banner'><Link to='/setup'>Complete first-run setup</Link></div>
-        )}
-        <Routes>
-          <Route path='/' element={<Newsstand />} />
-          <Route path='/publication/:id' element={<PublicationDetail />} />
-          <Route path='/read/:id/:pageNumber' element={<Reader status={status} />} />
-          <Route path='/author' element={<Author status={status} />} />
-          <Route path='/author/read/:id/:pageNumber' element={<AuthorPreview />} />
-          <Route path='/admin' element={<Admin />} />
-          <Route path='/setup' element={<Setup status={status} refresh={refresh} />} />
-        </Routes>
-      </Shell>
+      <AppRoutes status={status} refresh={refresh} />
     </BrowserRouter>
   )
 }

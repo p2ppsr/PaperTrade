@@ -118,6 +118,12 @@ async function canManagePublication (identityKey: string, publication: any): Pro
   return publication.author_identity_key === identityKey || await isAdmin(identityKey)
 }
 
+async function sendPngFile (res: Response, filePath: string): Promise<void> {
+  const image = await fs.readFile(filePath)
+  res.setHeader('Content-Type', 'image/png')
+  res.send(image)
+}
+
 async function deletePublication (publicationId: string, actor?: string): Promise<void> {
   await db.transaction(async trx => {
     await trx('publications').where({ id: publicationId }).delete()
@@ -236,7 +242,7 @@ async function sendPublicationPageImage (publication: any, pageNumber: number, r
     return
   }
   res.setHeader('Cache-Control', 'private, max-age=60')
-  res.sendFile(page.image_path)
+  await sendPngFile(res, page.image_path)
 }
 
 async function sendPageImage (req: Request, res: Response): Promise<void> {
@@ -325,6 +331,22 @@ async function createApp (): Promise<express.Express> {
 
   const app = express()
   app.disable('x-powered-by')
+  app.use((req, res, next) => {
+    const startedAt = Date.now()
+    res.on('finish', () => {
+      if (req.path.startsWith(ROUTING_PREFIX) && res.statusCode >= 400) {
+        console.warn(JSON.stringify({
+          level: 'warn',
+          service: 'papertrade',
+          method: req.method,
+          path: req.path,
+          statusCode: res.statusCode,
+          durationMs: Date.now() - startedAt
+        }))
+      }
+    })
+    next()
+  })
   app.use(bodyParser.json({ limit: JSON_BODY_LIMIT }))
   app.use((req, res, next) => {
     res.header('Access-Control-Allow-Origin', '*')
@@ -923,8 +945,15 @@ async function createApp (): Promise<express.Express> {
     res.sendFile(path.join(clientRoot, 'index.html'))
   })
 
-  app.use((err: Error, _req: Request, res: Response, _next: NextFunction) => {
-    console.error(err)
+  app.use((err: Error, req: Request, res: Response, _next: NextFunction) => {
+    console.error(JSON.stringify({
+      level: 'error',
+      service: 'papertrade',
+      method: req.method,
+      path: req.path,
+      message: err.message,
+      stack: err.stack
+    }))
     res.status(500).json({ status: 'error', message: err.message !== '' ? err.message : 'Internal server error' })
   })
 

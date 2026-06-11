@@ -152,6 +152,10 @@ main {
   margin-bottom: 24px;
 }
 
+.newsstand-head p {
+  max-width: 620px;
+}
+
 h1,
 h2,
 p {
@@ -170,7 +174,9 @@ h1 {
 }
 
 .publication,
-.tool-panel {
+.tool-panel,
+.feedback-panel,
+.wallet-help {
   background: white;
   border: 1px solid #ddd8ca;
   border-radius: 8px;
@@ -310,6 +316,37 @@ h1 {
   margin-top: 18px;
 }
 
+.feedback-panel {
+  margin-top: 20px;
+}
+
+.feedback-panel h2 {
+  align-items: center;
+  display: flex;
+  font-size: 18px;
+  gap: 8px;
+}
+
+.feedback-grid {
+  display: grid;
+  gap: 14px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.wallet-help {
+  align-items: center;
+  display: flex;
+  gap: 18px;
+  justify-content: space-between;
+  max-width: 760px;
+  width: 100%;
+}
+
+.wallet-help p {
+  color: #5c6570;
+  margin: 4px 0 0;
+}
+
 .publication-editor {
   border-bottom: 1px solid #ece8dd;
   display: grid;
@@ -350,6 +387,10 @@ h1 {
   padding: 12px 14px;
 }
 
+.notice.compact {
+  margin: 12px 0 0;
+}
+
 @media (max-width: 840px) {
   .app-shell {
     grid-template-columns: 1fr;
@@ -374,6 +415,16 @@ h1 {
 
   .wizard-grid {
     grid-template-columns: 1fr;
+  }
+
+  .feedback-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .page-head,
+  .wallet-help {
+    align-items: stretch;
+    flex-direction: column;
   }
 
   .avatar-row {
