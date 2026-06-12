@@ -99,6 +99,9 @@ run_kaniko() {
   local destination="$2"
   shift 2
   local digest_file="/kaniko/digest-$(basename "${dockerfile}")"
+  local image_ref="${destination#${registry_push}/}"
+  local image_repo="${image_ref%:*}"
+  local image_ref_tag="${image_ref##*:}"
 
   printf 'Building %s\n' "${destination}"
   "${kubectl_cmd}" exec "${pod}" -- /kaniko/executor \
@@ -116,6 +119,15 @@ run_kaniko() {
     "$@"
 
   last_digest="$("${kubectl_cmd}" exec "${pod}" -- cat "${digest_file}" 2>/dev/null || true)"
+  if [[ -z "${last_digest}" ]] && command -v curl >/dev/null 2>&1; then
+    last_digest="$(
+      curl --fail --silent --show-error --head \
+        -H 'Accept: application/vnd.docker.distribution.manifest.v2+json' \
+        "http://${registry_push}/v2/${image_repo}/manifests/${image_ref_tag}" \
+        | awk -F': ' 'tolower($1) == "docker-content-digest" { gsub("\r", "", $2); print $2; exit }' \
+        || true
+    )"
+  fi
 }
 
 if [[ "${build_target}" == "runtime-base" || "${build_target}" == "all" ]]; then
