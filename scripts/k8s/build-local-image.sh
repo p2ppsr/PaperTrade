@@ -20,6 +20,7 @@ Environment:
   REGISTRY_PULL            Pull registry written into manifests and build args.
   KANIKO_CACHE_REPO        Cache repository. Defaults to <REGISTRY_PUSH>/p2ppsr/papertrade-build-cache.
   KANIKO_CACHE_TTL         Cache TTL. Defaults to 720h.
+  REGISTRY_DIGEST_TIMEOUT  Seconds to wait for registry digest lookup. Defaults to 5.
 EOF
 }
 
@@ -43,6 +44,7 @@ kaniko_image="${KANIKO_IMAGE:-gcr.io/kaniko-project/executor:debug}"
 build_target="${BUILD_TARGET:-app}"
 cache_repo="${KANIKO_CACHE_REPO:-${registry_push}/p2ppsr/papertrade-build-cache}"
 cache_ttl="${KANIKO_CACHE_TTL:-720h}"
+registry_digest_timeout="${REGISTRY_DIGEST_TIMEOUT:-5}"
 runtime_base_push_image="${registry_push}/p2ppsr/papertrade-runtime-base:${runtime_base_tag}"
 runtime_base_pull_image="${REGISTRY_PULL_RUNTIME_BASE:-${registry_pull}/p2ppsr/papertrade-runtime-base:${runtime_base_tag}}"
 runtime_base_image="${RUNTIME_BASE_IMAGE:-${runtime_base_pull_image}}"
@@ -64,7 +66,7 @@ case "${build_target}" in
 esac
 
 cleanup() {
-  "${kubectl_cmd}" delete pod "${pod}" --ignore-not-found=true >/dev/null 2>&1 || true
+  "${kubectl_cmd}" delete pod "${pod}" --ignore-not-found=true --wait=false >/dev/null 2>&1 || true
 }
 trap cleanup EXIT
 
@@ -121,7 +123,7 @@ run_kaniko() {
   last_digest="$("${kubectl_cmd}" exec "${pod}" -- cat "${digest_file}" 2>/dev/null || true)"
   if [[ -z "${last_digest}" ]] && command -v curl >/dev/null 2>&1; then
     last_digest="$(
-      curl --fail --silent --show-error --head \
+      curl --fail --silent --show-error --head --max-time "${registry_digest_timeout}" \
         -H 'Accept: application/vnd.docker.distribution.manifest.v2+json' \
         "http://${registry_push}/v2/${image_repo}/manifests/${image_ref_tag}" \
         | awk -F': ' 'tolower($1) == "docker-content-digest" { gsub("\r", "", $2); print $2; exit }' \
