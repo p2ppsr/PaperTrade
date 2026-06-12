@@ -1,26 +1,21 @@
 FROM node:22-bookworm-slim AS build
 
 WORKDIR /app
+ENV NPM_CONFIG_LEGACY_PEER_DEPS=true
 COPY package*.json ./
-RUN npm install
+RUN npm ci && npm cache clean --force
 COPY . .
 RUN npm run build
 
-FROM node:22-bookworm-slim
+ARG RUNTIME_BASE_IMAGE=registry.cars-operator-system.svc.cluster.local:5000/p2ppsr/papertrade-runtime-base:node22-bookworm-docs-2026-06-11
+FROM ${RUNTIME_BASE_IMAGE}
 
 ENV NODE_ENV=production
 WORKDIR /app
-
-RUN apt-get update \
-  && apt-get install -y --no-install-recommends \
-    ca-certificates \
-    poppler-utils \
-    libreoffice-writer \
-    calibre \
-  && rm -rf /var/lib/apt/lists/*
+ENV NPM_CONFIG_LEGACY_PEER_DEPS=true
 
 COPY package*.json ./
-RUN npm install --omit=dev
+RUN npm ci --omit=dev && npm cache clean --force
 COPY --from=build /app/build ./build
 COPY --from=build /app/dist ./dist
 COPY migrations ./migrations

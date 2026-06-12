@@ -1,0 +1,89 @@
+name: Deploy Production Local Kubernetes
+
+on:
+  workflow_dispatch:
+    inputs:
+      source_sha:
+        description: Commit SHA to deploy. Defaults to the selected ref.
+        required: false
+        type: string
+      build_runtime_base:
+        description: Rebuild the heavy document-conversion runtime base image first.
+        required: false
+        default: "false"
+        type: choice
+        options:
+          - "false"
+          - "true"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: papertrade-production-local
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on:
+      - self-hosted
+      - private-production-local-deploy
+      - linux-amd64
+      - docker
+      - kubectl
+      - local-registry
+    environment: production
+    env:
+      REGISTRY_PUSH: ${{ vars.LOCAL_REGISTRY_PUSH || '10.152.183.28:5000' }}
+      REGISTRY_PULL: ${{ vars.LOCAL_REGISTRY_PULL || 'registry.cars-operator-system.svc.cluster.local:5000' }}
+      KUBECTL: ${{ vars.LOCAL_KUBECTL || 'kubectl' }}
+      SQL_DATABASE_USER: ${{ secrets.PROD_SQL_DATABASE_USER }}
+      SQL_DATABASE_PASSWORD: ${{ secrets.PROD_SQL_DATABASE_PASSWORD }}
+      SERVER_PRIVATE_KEY: ${{ secrets.PROD_SERVER_PRIVATE_KEY }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Select deploy commit
+        run: |
+          set -euo pipefail
+          if [[ -n "${{ github.event.inputs.source_sha }}" ]]; then
+            git checkout --detach "${{ github.event.inputs.source_sha }}"
+          fi
+          echo "SOURCE_SHA=$(git rev-parse HEAD)" >> "$GITHUB_ENV"
+      - name: Local deploy preflight
+        run: |
+          set -euo pipefail
+          "${KUBECTL}" version --client
+          "${KUBECTL}" get nodes -o wide
+          "${KUBECTL}" -n papertrade-prod get deployment/papertrade >/dev/null 2>&1 || true
+      - name: Seed runtime base image
+        if: ${{ github.event.inputs.build_runtime_base == 'true' }}
+        run: |
+          set -euo pipefail
+          BUILD_TARGET=runtime-base scripts/k8s/build-local-image.sh
+      - name: Build and publish PaperTrade image
+        id: build
+        run: |
+          set -euo pipefail
+          BUILD_TARGET=app scripts/k8s/build-local-image.sh
+      - name: Deploy production to local Kubernetes
+        run: |
+          set -euo pipefail
+          IMAGE_TAG="${{ steps.build.outputs.image_tag }}" scripts/k8s/deploy-local.sh
+      - uses: actions/upload-artifact@v4
+        with:
+          name: papertrade-release-manifest-${{ steps.build.outputs.image_tag }}
+          path: release-manifest.json
+      - name: Deployment summary
+        run: |
+          {
+            echo "### PaperTrade production deployment"
+            echo ""
+            echo "- Commit: \`${SOURCE_SHA}\`"
+            echo "- Image tag: \`${{ steps.build.outputs.image_tag }}\`"
+            echo "- Image: \`${{ steps.build.outputs.image }}\`"
+            echo "- Digest: \`${{ steps.build.outputs.image_digest }}\`"
+            echo "- Runtime base: \`${{ steps.build.outputs.runtime_base_image }}\`"
+            echo "- Namespace: \`papertrade-prod\`"
+          } >> "$GITHUB_STEP_SUMMARY"
