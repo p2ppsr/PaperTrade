@@ -134,8 +134,19 @@ const BSV_BROWSER_URL = 'https://desktop.bsvb.tech/'
 const PAPERTRADE_GITHUB_URL = 'https://github.com/p2ppsr/PaperTrade'
 const WALLET_TIMEOUT_MS = 20000
 let walletRequestQueue: Promise<unknown> = Promise.resolve()
+let activeWalletRequestContext: Record<string, unknown> = {}
+let activeWalletRequestContextToken = 0
+let cachedWalletSubstrate: WalletSubstrate | null = null
+let cachedWallet: WalletClient | null = null
+let cachedAuthFetch: AuthFetch | null = null
 const TELEMETRIED_WALLET_METHODS = new Set([
   'getPublicKey',
+  'createHmac',
+  'verifyHmac',
+  'createSignature',
+  'verifySignature',
+  'encrypt',
+  'decrypt',
   'createAction',
   'signAction',
   'abortAction',
@@ -148,8 +159,11 @@ const TELEMETRIED_WALLET_METHODS = new Set([
   'proveCertificate',
   'relinquishCertificate',
   'discoverByIdentityKey',
+  'discoverByAttributes',
   'isAuthenticated',
   'waitForAuthentication',
+  'getHeight',
+  'getHeaderForHeight',
   'getNetwork',
   'getVersion'
 ])
@@ -180,8 +194,32 @@ interface WalletOption {
   icon: 'phone' | 'desktop'
 }
 
+function resetWalletClients (reason: string): void {
+  cachedWallet = null
+  cachedAuthFetch = null
+  cachedWalletSubstrate = null
+  activeWalletRequestContext = {}
+  activeWalletRequestContextToken += 1
+  postTelemetry('wallet.client_reset', 'warn', { context: { reason } })
+}
+
 function getWallet (): WalletClient {
-  return new WalletClient(getWalletSubstrate(), WALLET_ORIGINATOR)
+  const substrate = getWalletSubstrate()
+  if (cachedWallet == null || cachedWalletSubstrate !== substrate) {
+    cachedWalletSubstrate = substrate
+    cachedWallet = instrumentWalletForTelemetry(new WalletClient(substrate, WALLET_ORIGINATOR))
+    cachedAuthFetch = null
+    postTelemetry('wallet.client_created', 'info', { context: { walletSubstrate: substrate } })
+  }
+  return cachedWallet
+}
+
+function getAuthFetch (): AuthFetch {
+  if (cachedAuthFetch == null) {
+    cachedAuthFetch = new AuthFetch(getWallet(), undefined, undefined, WALLET_ORIGINATOR)
+    postTelemetry('wallet.auth_fetch_created', 'info', { context: { walletSubstrate: cachedWalletSubstrate ?? getWalletSubstrate() } })
+  }
+  return cachedAuthFetch
 }
 
 function summarizeWalletResult (result: unknown): Record<string, unknown> {
@@ -202,13 +240,14 @@ function summarizeWalletResult (result: unknown): Record<string, unknown> {
   })
 }
 
-function instrumentWalletForTelemetry (wallet: WalletClient, requestContext: Record<string, unknown>): WalletClient {
+function instrumentWalletForTelemetry (wallet: WalletClient): WalletClient {
   return new Proxy(wallet as unknown as Record<string, unknown>, {
     get (target, property, receiver) {
       const value = Reflect.get(target, property, receiver)
       if (typeof property !== 'string' || typeof value !== 'function' || !TELEMETRIED_WALLET_METHODS.has(property)) return value
       return async (...args: unknown[]) => {
         const startedAt = performance.now()
+        const requestContext = { ...activeWalletRequestContext }
         postTelemetry('wallet.method_started', 'info', {
           context: {
             ...requestContext,
@@ -343,9 +382,12 @@ async function authFetch (url: string, init?: RequestInit, action = 'complete th
     postTelemetry('wallet.request_started', 'info', {
       context: { method, url: new URL(requestUrl).pathname }
     })
-    const wallet = instrumentWalletForTelemetry(getWallet(), { method, url: new URL(requestUrl).pathname, action })
-    const fetcher = new AuthFetch(wallet, undefined, undefined, WALLET_ORIGINATOR)
+    const previousWalletContext = activeWalletRequestContext
+    const contextToken = activeWalletRequestContextToken + 1
+    activeWalletRequestContextToken = contextToken
+    activeWalletRequestContext = { method, url: new URL(requestUrl).pathname, action }
     try {
+      const fetcher = getAuthFetch()
       const response = await fetcher.fetch(requestUrl, init as any)
       postTelemetry(response.ok ? 'wallet.request_finished' : 'wallet.request_http_error', response.ok ? 'info' : 'warn', {
         durationMs: performance.now() - startedAt,
@@ -368,11 +410,19 @@ async function authFetch (url: string, init?: RequestInit, action = 'complete th
         }
       })
       throw normalized
+    } finally {
+      if (activeWalletRequestContextToken === contextToken) activeWalletRequestContext = previousWalletContext
     }
   }
   const next = walletRequestQueue.then(async () => await withWalletTimeout(request(), action), async () => await withWalletTimeout(request(), action))
   walletRequestQueue = next.then(() => undefined, () => undefined)
-  return await next
+  try {
+    return await next
+  } catch (err) {
+    const message = err instanceof Error ? err.message : typeof err === 'string' ? err : ''
+    if (message.includes('timed out')) resetWalletClients('wallet_timeout')
+    throw err
+  }
 }
 
 async function withWalletTimeout<T> (promise: Promise<T>, action: string): Promise<T> {
@@ -390,8 +440,20 @@ async function withWalletTimeout<T> (promise: Promise<T>, action: string): Promi
   }
 }
 
-async function paidPageFetch (url: string): Promise<Response> {
-  return await authFetch(url, undefined, 'pay for this page')
+async function withWalletTelemetryContext<T> (context: Record<string, unknown>, fn: () => Promise<T>): Promise<T> {
+  const previousWalletContext = activeWalletRequestContext
+  const contextToken = activeWalletRequestContextToken + 1
+  activeWalletRequestContextToken = contextToken
+  activeWalletRequestContext = context
+  try {
+    return await fn()
+  } finally {
+    if (activeWalletRequestContextToken === contextToken) activeWalletRequestContext = previousWalletContext
+  }
+}
+
+async function protectedPageFetch (url: string): Promise<Response> {
+  return await authFetch(url, undefined, 'unlock this page')
 }
 
 function withFormatJson (url: string): string {
@@ -400,7 +462,7 @@ function withFormatJson (url: string): string {
 
 async function pageFetch (url: string, pageNumber: number): Promise<Response> {
   if (pageNumber === 1) return await fetch(url)
-  return await paidPageFetch(withFormatJson(url))
+  return await protectedPageFetch(withFormatJson(url))
 }
 
 function base64ToBlob (base64: string, mimeType: string): Blob {
@@ -1337,20 +1399,23 @@ function Author ({ status }: { status: Status | null }): JSX.Element {
       const payout = json.payout
       const wallet = getWallet()
       try {
-        const result = await withWalletTimeout<{ accepted?: boolean }>((wallet as any).internalizeAction({
-          tx: Utils.toArray(payout.txBase64, 'base64'),
-          outputs: [{
-            outputIndex: payout.outputIndex,
-            protocol: 'wallet payment',
-            paymentRemittance: {
-              derivationPrefix: payout.derivationPrefix,
-              derivationSuffix: payout.derivationSuffix,
-              senderIdentityKey: payout.serverIdentityKey
-            }
-          }],
-          description: 'PaperTrade author payout',
-          labels: ['papertrade-payout']
-        }, WALLET_ORIGINATOR), 'receive your payout')
+        const result = await withWalletTelemetryContext(
+          { method: 'POST', url: `/api/me/payouts/${payout.payoutId}/internalize`, action: 'receive your payout' },
+          async () => await withWalletTimeout<{ accepted?: boolean }>((wallet as any).internalizeAction({
+            tx: Utils.toArray(payout.txBase64, 'base64'),
+            outputs: [{
+              outputIndex: payout.outputIndex,
+              protocol: 'wallet payment',
+              paymentRemittance: {
+                derivationPrefix: payout.derivationPrefix,
+                derivationSuffix: payout.derivationSuffix,
+                senderIdentityKey: payout.serverIdentityKey
+              }
+            }],
+            description: 'PaperTrade author payout',
+            labels: ['papertrade-payout']
+          }, WALLET_ORIGINATOR), 'receive your payout')
+        )
         if (result?.accepted !== true) throw new Error('Wallet did not accept the payout')
 
         const ack = await authFetch(`${API}/me/payouts/${payout.payoutId}/ack`, {
