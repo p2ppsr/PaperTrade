@@ -348,6 +348,7 @@ function appearanceFromStatus (status: Status | null): Appearance {
     }
   }
 }
+const mountedIdentityCardKeys = new Set<string>()
 
 function appearanceStyle (appearance: Appearance): React.CSSProperties {
   const style: React.CSSProperties & Record<string, string> = {
@@ -753,7 +754,21 @@ function shortKey (value: string): string {
 }
 
 function IdentityPill ({ identityKey, label }: { identityKey?: string | null, label?: string | null }): JSX.Element {
-  if (!looksLikeIdentityKey(identityKey)) return <span className='identity-fallback'>{label ?? 'Unknown identity'}</span>
+  const canResolve = looksLikeIdentityKey(identityKey)
+  const [renderCard, setRenderCard] = useState(false)
+  useEffect(() => {
+    setRenderCard(false)
+    if (!canResolve) return
+    const key = identityKey
+    if (mountedIdentityCardKeys.has(key)) return
+    mountedIdentityCardKeys.add(key)
+    setRenderCard(true)
+    return () => {
+      mountedIdentityCardKeys.delete(key)
+    }
+  }, [canResolve, identityKey])
+  if (!canResolve) return <span className='identity-fallback'>{label ?? 'Unknown identity'}</span>
+  if (!renderCard) return <span className='identity-fallback'>{label ?? shortKey(identityKey)}</span>
   return (
     <div className='identity-card-wrap' title={label ?? shortKey(identityKey)}>
       <IdentityCard identityKey={identityKey} />
@@ -1065,6 +1080,12 @@ function Reader ({ status }: { status: Status | null }): JSX.Element {
   useEffect(() => {
     let live = true
     let walletWaitTimer: number | undefined
+    const clearWalletWaitTimer = (): void => {
+      if (walletWaitTimer != null) {
+        window.clearTimeout(walletWaitTimer)
+        walletWaitTimer = undefined
+      }
+    }
     setImageUrl(null)
     setMessage('Loading page...')
     setIsLoading(true)
@@ -1077,6 +1098,7 @@ function Reader ({ status }: { status: Status | null }): JSX.Element {
       .then(async res => await responseToPngBlob(res, 'Page request failed', currentPage > 1))
       .then(blob => {
         if (!live) return
+        clearWalletWaitTimer()
         setImageUrl(URL.createObjectURL(blob))
         setMessage('')
         setIsLoading(false)
@@ -1088,6 +1110,7 @@ function Reader ({ status }: { status: Status | null }): JSX.Element {
       })
       .catch(err => {
         if (!live) return
+        clearWalletWaitTimer()
         const nextMessage = friendlyErrorMessage(err, 'Unable to load page')
         setMessage(nextMessage)
         setIsLoading(false)
@@ -1095,7 +1118,7 @@ function Reader ({ status }: { status: Status | null }): JSX.Element {
       })
     return () => {
       live = false
-      if (walletWaitTimer != null) window.clearTimeout(walletWaitTimer)
+      clearWalletWaitTimer()
     }
   }, [id, currentPage])
 
