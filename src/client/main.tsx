@@ -137,6 +137,8 @@ let activeWalletRequestContextToken = 0
 let cachedWalletSubstrate: WalletSubstrate | null = null
 let cachedWallet: WalletClient | null = null
 let cachedAuthFetch: AuthFetch | null = null
+const readerPageBlobCache = new Map<string, Blob>()
+const READER_PAGE_BLOB_CACHE_LIMIT = 50
 const TELEMETRIED_WALLET_METHODS = new Set([
   'getPublicKey',
   'createHmac',
@@ -452,6 +454,30 @@ async function protectedPageFetch (url: string): Promise<Response> {
 
 function withFormatJson (url: string): string {
   return `${url}${url.includes('?') ? '&' : '?'}format=json`
+}
+
+function readerPageCacheKey (publicationId: string, pageNumber: number): string {
+  return `${publicationId}:${pageNumber}`
+}
+
+function rememberReaderPageBlob (publicationId: string, pageNumber: number, blob: Blob): void {
+  const key = readerPageCacheKey(publicationId, pageNumber)
+  readerPageBlobCache.delete(key)
+  readerPageBlobCache.set(key, blob)
+  while (readerPageBlobCache.size > READER_PAGE_BLOB_CACHE_LIMIT) {
+    const oldest = readerPageBlobCache.keys().next().value
+    if (oldest == null) break
+    readerPageBlobCache.delete(oldest)
+  }
+}
+
+function cachedReaderPageBlob (publicationId: string, pageNumber: number): Blob | undefined {
+  const key = readerPageCacheKey(publicationId, pageNumber)
+  const blob = readerPageBlobCache.get(key)
+  if (blob == null) return undefined
+  readerPageBlobCache.delete(key)
+  readerPageBlobCache.set(key, blob)
+  return blob
 }
 
 async function pageFetch (url: string, pageNumber: number): Promise<Response> {
@@ -1080,15 +1106,38 @@ function Reader ({ status }: { status: Status | null }): JSX.Element {
   useEffect(() => {
     let live = true
     let walletWaitTimer: number | undefined
+    let objectUrl: string | undefined
     const clearWalletWaitTimer = (): void => {
       if (walletWaitTimer != null) {
         window.clearTimeout(walletWaitTimer)
         walletWaitTimer = undefined
       }
     }
+    const renderBlob = (blob: Blob, cacheHit: boolean): void => {
+      clearWalletWaitTimer()
+      if (objectUrl != null) URL.revokeObjectURL(objectUrl)
+      objectUrl = URL.createObjectURL(blob)
+      setImageUrl(objectUrl)
+      setMessage('')
+      setIsLoading(false)
+      postSignal('reader.page_loaded', usercomMetadata({
+        surface: 'reader',
+        tags: [currentPage === 1 ? 'page:first_free' : 'page:paid', cacheHit ? 'cache:hit' : 'cache:miss'],
+        context: { publicationId: id, pageNumber: currentPage, cacheHit }
+      }))
+    }
     setImageUrl(null)
     setMessage('Loading page...')
     setIsLoading(true)
+    const cachedBlob = cachedReaderPageBlob(id, currentPage)
+    if (cachedBlob != null) {
+      renderBlob(cachedBlob, true)
+      return () => {
+        live = false
+        clearWalletWaitTimer()
+        if (objectUrl != null) URL.revokeObjectURL(objectUrl)
+      }
+    }
     if (currentPage > 1) {
       walletWaitTimer = window.setTimeout(() => {
         if (live) setMessage('Waiting for wallet approval...')
@@ -1098,15 +1147,8 @@ function Reader ({ status }: { status: Status | null }): JSX.Element {
       .then(async res => await responseToPngBlob(res, 'Page request failed', currentPage > 1))
       .then(blob => {
         if (!live) return
-        clearWalletWaitTimer()
-        setImageUrl(URL.createObjectURL(blob))
-        setMessage('')
-        setIsLoading(false)
-        postSignal('reader.page_loaded', usercomMetadata({
-          surface: 'reader',
-          tags: [currentPage === 1 ? 'page:first_free' : 'page:paid'],
-          context: { publicationId: id, pageNumber: currentPage }
-        }))
+        rememberReaderPageBlob(id, currentPage, blob)
+        renderBlob(blob, false)
       })
       .catch(err => {
         if (!live) return
@@ -1119,6 +1161,7 @@ function Reader ({ status }: { status: Status | null }): JSX.Element {
     return () => {
       live = false
       clearWalletWaitTimer()
+      if (objectUrl != null) URL.revokeObjectURL(objectUrl)
     }
   }, [id, currentPage])
 
@@ -1131,7 +1174,7 @@ function Reader ({ status }: { status: Status | null }): JSX.Element {
       </div>
       {message !== '' && !isWalletHelpMessage(message) && <p className='empty'>{message}</p>}
       <WalletHelp message={message} freePageUrl={currentPage > 1 ? `/read/${id}/1` : undefined} />
-      {imageUrl != null && <img className='page-image' src={imageUrl} alt={`Page ${currentPage}`} />}
+      {imageUrl != null && <img className='page-image' src={imageUrl} alt={`Rendered page ${currentPage}`} />}
     </section>
   )
 }
