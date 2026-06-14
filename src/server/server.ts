@@ -6,7 +6,7 @@ import multer from 'multer'
 import path from 'path'
 import fs from 'fs/promises'
 import { fileURLToPath } from 'url'
-import { createHash, randomUUID } from 'crypto'
+import { createHash, createHmac, randomUUID, timingSafeEqual } from 'crypto'
 import { P2PKH, PublicKey, Random, Utils } from '@bsv/sdk'
 import { createAuthMiddleware } from '@bsv/auth-express-middleware'
 import { createPaymentMiddleware } from '@bsv/payment-express-middleware'
@@ -29,6 +29,7 @@ const MAX_APPEARANCE_ASSET_BYTES = 3 * 1024 * 1024
 const BRC29_PROTOCOL_ID = [2, '3241645161d8'] as const
 const AUTHOR_PAYOUT_PENDING_STATUSES = ['creating', 'pending_internalize']
 const WALLET_BALANCE_BASKET = '893b7646de0e1c9f741bd6e9169b76a8847ae34adef7bef1e6a285371206d2e8'
+const PAGE_ACCESS_TOKEN_TTL_MS = 90 * 1000
 
 interface AuthenticatedRequest extends Request {
   auth?: { identityKey: string }
@@ -40,6 +41,14 @@ interface JsonUploadBody {
   fileName?: unknown
   mimeType?: unknown
   dataBase64?: unknown
+}
+
+interface PageAccessTokenPayload {
+  publicationId: string
+  pageNumber: number
+  access: 'reader' | 'manager'
+  expiresAt: number
+  nonce: string
 }
 
 interface AppearanceInput {
@@ -110,6 +119,62 @@ function safeNumber (value: unknown): number | null {
   const numeric = Number(value)
   if (!Number.isFinite(numeric) || numeric < 0) return null
   return Math.min(Math.round(numeric), 24 * 60 * 60 * 1000)
+}
+
+function base64UrlEncode (input: string | Buffer): string {
+  return Buffer.from(input)
+    .toString('base64')
+    .replace(/\+/g, '-')
+    .replace(/\//g, '_')
+    .replace(/=+$/g, '')
+}
+
+function base64UrlDecode (value: string): Buffer {
+  const normalized = value.replace(/-/g, '+').replace(/_/g, '/')
+  const padding = normalized.length % 4 === 0 ? '' : '='.repeat(4 - (normalized.length % 4))
+  return Buffer.from(`${normalized}${padding}`, 'base64')
+}
+
+function pageAccessTokenSecret (secret: string): Buffer {
+  return /^[0-9a-f]+$/i.test(secret) && secret.length % 2 === 0
+    ? Buffer.from(secret, 'hex')
+    : Buffer.from(secret, 'utf8')
+}
+
+function signPageAccessTokenPayload (secret: string, encodedPayload: string): string {
+  return base64UrlEncode(createHmac('sha256', pageAccessTokenSecret(secret)).update(encodedPayload).digest())
+}
+
+function createPageAccessToken (secret: string, payload: PageAccessTokenPayload): string {
+  const encodedPayload = base64UrlEncode(JSON.stringify(payload))
+  return `${encodedPayload}.${signPageAccessTokenPayload(secret, encodedPayload)}`
+}
+
+function verifyPageAccessToken (secret: string, token: string): PageAccessTokenPayload | null {
+  const [encodedPayload, encodedSignature, extra] = token.split('.')
+  if (encodedPayload == null || encodedPayload === '' || encodedSignature == null || encodedSignature === '' || extra != null) return null
+
+  const expected = Buffer.from(signPageAccessTokenPayload(secret, encodedPayload))
+  const actual = Buffer.from(encodedSignature)
+  if (expected.length !== actual.length || !timingSafeEqual(expected, actual)) return null
+
+  try {
+    const payload = JSON.parse(base64UrlDecode(encodedPayload).toString('utf8')) as Partial<PageAccessTokenPayload>
+    if (typeof payload.publicationId !== 'string' || payload.publicationId === '') return null
+    if (!Number.isInteger(payload.pageNumber) || Number(payload.pageNumber) < 1) return null
+    if (payload.access !== 'reader' && payload.access !== 'manager') return null
+    if (!Number.isInteger(payload.expiresAt) || Number(payload.expiresAt) < Date.now()) return null
+    if (typeof payload.nonce !== 'string' || payload.nonce === '') return null
+    return {
+      publicationId: payload.publicationId,
+      pageNumber: Number(payload.pageNumber),
+      access: payload.access,
+      expiresAt: Number(payload.expiresAt),
+      nonce: payload.nonce
+    }
+  } catch {
+    return null
+  }
 }
 
 function safeOccurredAt (value: unknown): Date | null {
@@ -319,9 +384,9 @@ async function canManagePublication (identityKey: string, publication: any): Pro
   return publication.author_identity_key === identityKey || await isAdmin(identityKey)
 }
 
-async function sendPngResponse (req: Request, res: Response, filePath: string): Promise<void> {
+async function sendPngResponse (req: Request, res: Response, filePath: string, allowJson = true): Promise<void> {
   const image = await fs.readFile(filePath)
-  if (req.query.format === 'json') {
+  if (allowJson && req.query.format === 'json') {
     res.json({
       status: 'success',
       mimeType: 'image/png',
@@ -404,7 +469,14 @@ async function requireReaderForPaidPage (req: Request, res: Response, next: Next
   }
 }
 
-async function sendPublicationPageImage (publication: any, pageNumber: number, req: Request, res: Response): Promise<void> {
+async function sendPublicationPageImage (
+  publication: any,
+  pageNumber: number,
+  req: Request,
+  res: Response,
+  pageTokenSecret?: string,
+  access: PageAccessTokenPayload['access'] = 'reader'
+): Promise<void> {
   if (!Number.isInteger(pageNumber) || pageNumber < 1 || pageNumber > Number(publication.page_count)) {
     res.status(404).json({ status: 'error', message: 'Page not found' })
     return
@@ -475,17 +547,34 @@ async function sendPublicationPageImage (publication: any, pageNumber: number, r
     res.setHeader('X-PaperTrade-Page-Access', satsPaid > 0 ? 'paid' : 'owned')
   }
   res.setHeader('Cache-Control', 'private, max-age=60')
+  if (req.query.format === 'json' && pageTokenSecret != null && readerIdentityKey != null) {
+    const expiresAt = Date.now() + PAGE_ACCESS_TOKEN_TTL_MS
+    const token = createPageAccessToken(pageTokenSecret, {
+      publicationId: publication.id,
+      pageNumber,
+      access,
+      expiresAt,
+      nonce: randomUUID()
+    })
+    res.json({
+      status: 'success',
+      mimeType: 'image/png',
+      imageUrl: `${ROUTING_PREFIX}/publications/${String(publication.id)}/pages/${pageNumber}/rendered?token=${encodeURIComponent(token)}`,
+      expiresAt
+    })
+    return
+  }
   await sendPngResponse(req, res, page.image_path)
 }
 
-async function sendPageImage (req: Request, res: Response): Promise<void> {
+async function sendPageImage (req: Request, res: Response, pageTokenSecret?: string): Promise<void> {
   const pageNumber = Number(req.params.pageNumber)
   const publication = await db('publications').where({ id: req.params.id, status: 'published' }).first()
   if (publication == null) {
     res.status(404).json({ status: 'error', message: 'Publication not found' })
     return
   }
-  await sendPublicationPageImage(publication, pageNumber, req, res)
+  await sendPublicationPageImage(publication, pageNumber, req, res, pageTokenSecret, 'reader')
 }
 
 async function getAuthorPayableBalance (identityKey: string, trx: any = db): Promise<number> {
@@ -1067,9 +1156,44 @@ async function createApp (): Promise<express.Express> {
     }
   })
 
+  api.get('/publications/:id/pages/:pageNumber/rendered', async (req, res, next) => {
+    try {
+      const token = typeof req.query.token === 'string' ? req.query.token : ''
+      const pageNumber = Number(req.params.pageNumber)
+      const payload = verifyPageAccessToken(walletBootstrap.privateKeyHex, token)
+      if (
+        payload == null ||
+        payload.publicationId !== req.params.id ||
+        payload.pageNumber !== pageNumber ||
+        !Number.isInteger(pageNumber)
+      ) {
+        res.status(403).json({ status: 'error', message: 'Page access token is invalid or expired' })
+        return
+      }
+
+      const publication = await db('publications').where({ id: req.params.id }).first()
+      if (publication == null || (payload.access === 'reader' && publication.status !== 'published')) {
+        res.status(404).json({ status: 'error', message: 'Publication not found' })
+        return
+      }
+
+      const page = await db('publication_pages').where({ publication_id: publication.id, page_number: pageNumber }).first()
+      if (page == null) {
+        res.status(404).json({ status: 'error', message: 'Page image not found' })
+        return
+      }
+
+      res.setHeader('Cache-Control', 'private, max-age=60')
+      res.setHeader('X-PaperTrade-Page-Access', payload.access === 'reader' ? 'token' : 'preview-token')
+      await sendPngResponse(req, res, page.image_path, false)
+    } catch (err) {
+      next(err)
+    }
+  })
+
   api.get('/publications/:id/pages/:pageNumber', requireReaderForPaidPage, pagePaymentMiddleware, async (req, res, next) => {
     try {
-      await sendPageImage(req, res)
+      await sendPageImage(req, res, walletBootstrap.privateKeyHex)
     } catch (err) {
       next(err)
     }
@@ -1327,7 +1451,7 @@ async function createApp (): Promise<express.Express> {
       res.status(404).json({ status: 'error', message: 'Publication not found' })
       return
     }
-    await sendPublicationPageImage(publication, Number(req.params.pageNumber), req, res)
+    await sendPublicationPageImage(publication, Number(req.params.pageNumber), req, res, walletBootstrap.privateKeyHex, 'manager')
   })
 
   api.post('/me/publications/:id/submit', requireAuth, async (req, res) => {

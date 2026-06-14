@@ -500,6 +500,10 @@ async function responseToPngBlob (res: Response, fallbackMessage: string, expect
   const contentType = res.headers.get('content-type') ?? ''
   if (expectJson || contentType.includes('application/json')) {
     const json = await res.json()
+    if (typeof json.imageUrl === 'string') {
+      const imageResponse = await fetch(absoluteRequestUrl(json.imageUrl), { cache: 'no-store' })
+      return await responseToPngBlob(imageResponse, fallbackMessage)
+    }
     if (json.mimeType !== 'image/png' || typeof json.dataBase64 !== 'string') {
       throw new Error(`${fallbackMessage}: server did not return a rendered page image`)
     }
