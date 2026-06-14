@@ -104,8 +104,12 @@ run_kaniko() {
   local image_ref="${destination#${registry_push}/}"
   local image_repo="${image_ref%:*}"
   local image_ref_tag="${image_ref##*:}"
+  local build_log
+  local kaniko_status
 
   printf 'Building %s\n' "${destination}"
+  build_log="$(mktemp)"
+  set +e
   "${kubectl_cmd}" exec "${pod}" -- /kaniko/executor \
     --context=/kaniko/context \
     --dockerfile="/kaniko/context/${dockerfile}" \
@@ -118,9 +122,19 @@ run_kaniko() {
     --insecure-registry="${registry_push}" \
     --insecure-registry="${registry_pull}" \
     --skip-tls-verify \
-    "$@"
+    "$@" 2>&1 | tee "${build_log}"
+  kaniko_status="${PIPESTATUS[0]}"
+  set -e
+  if [[ "${kaniko_status}" -ne 0 ]]; then
+    rm -f "${build_log}"
+    return "${kaniko_status}"
+  fi
 
   last_digest="$("${kubectl_cmd}" exec "${pod}" -- cat "${digest_file}" 2>/dev/null || true)"
+  if [[ -z "${last_digest}" ]]; then
+    last_digest="$(sed -nE 's/.*Pushed .*@(sha256:[0-9a-f]{64}).*/\1/p' "${build_log}" | tail -1)"
+  fi
+  rm -f "${build_log}"
   if [[ -z "${last_digest}" ]] && command -v curl >/dev/null 2>&1; then
     last_digest="$(
       curl --fail --silent --show-error --head --max-time "${registry_digest_timeout}" \
