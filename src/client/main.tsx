@@ -414,7 +414,25 @@ async function authFetch (url: string, init?: RequestInit, action = 'complete th
       if (activeWalletRequestContextToken === contextToken) activeWalletRequestContext = previousWalletContext
     }
   }
-  const next = walletRequestQueue.then(async () => await withWalletTimeout(request(), action), async () => await withWalletTimeout(request(), action))
+  const requestWithAuthRetry = async (): Promise<Response> => {
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+      const response = await withWalletTimeout(request(), action)
+      if (response.status !== 401 || attempt > 0 || !hasEmbeddedWalletBridge()) return response
+
+      postTelemetry('wallet.request_unauthenticated_retry', 'warn', {
+        requestId: response.headers.get('x-papertrade-request-id'),
+        context: {
+          method: init?.method ?? 'GET',
+          url: new URL(absoluteRequestUrl(url)).pathname,
+          action
+        }
+      })
+      resetWalletClients('unauthenticated_response_retry')
+    }
+
+    return await withWalletTimeout(request(), action)
+  }
+  const next = walletRequestQueue.then(requestWithAuthRetry, requestWithAuthRetry)
   walletRequestQueue = next.then(() => undefined, () => undefined)
   try {
     return await next
