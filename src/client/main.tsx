@@ -132,8 +132,6 @@ const METANET_EXPLORER_ANDROID_URL = 'https://play.google.com/store/apps/details
 const BSV_BROWSER_ANDROID_URL = 'https://play.google.com/store/apps/details?id=org.bsvassociation.browser'
 const BSV_BROWSER_URL = 'https://desktop.bsvb.tech/'
 const PAPERTRADE_GITHUB_URL = 'https://github.com/p2ppsr/PaperTrade'
-const WALLET_TIMEOUT_MS = 120000
-let walletRequestQueue: Promise<unknown> = Promise.resolve()
 let activeWalletRequestContext: Record<string, unknown> = {}
 let activeWalletRequestContextToken = 0
 let cachedWalletSubstrate: WalletSubstrate | null = null
@@ -416,7 +414,7 @@ async function authFetch (url: string, init?: RequestInit, action = 'complete th
   }
   const requestWithAuthRetry = async (): Promise<Response> => {
     for (let attempt = 0; attempt < 2; attempt += 1) {
-      const response = await withWalletTimeout(request(), action)
+      const response = await request()
       if (response.status !== 401 || attempt > 0 || !hasEmbeddedWalletBridge()) return response
 
       postTelemetry('wallet.request_unauthenticated_retry', 'warn', {
@@ -430,32 +428,9 @@ async function authFetch (url: string, init?: RequestInit, action = 'complete th
       resetWalletClients('unauthenticated_response_retry')
     }
 
-    return await withWalletTimeout(request(), action)
+    return await request()
   }
-  const next = walletRequestQueue.then(requestWithAuthRetry, requestWithAuthRetry)
-  walletRequestQueue = next.then(() => undefined, () => undefined)
-  try {
-    return await next
-  } catch (err) {
-    const message = err instanceof Error ? err.message : typeof err === 'string' ? err : ''
-    if (message.includes('timed out')) resetWalletClients('wallet_timeout')
-    throw err
-  }
-}
-
-async function withWalletTimeout<T> (promise: Promise<T>, action: string): Promise<T> {
-  let timeoutId: number | undefined
-  const timeout = new Promise<never>((_resolve, reject) => {
-    timeoutId = window.setTimeout(() => {
-      postTelemetry('wallet.request_timeout', 'error', { context: { action } })
-      reject(new Error(`Wallet request timed out while trying to ${action}. Check that your BRC100 wallet is open and approve the request, then retry.`))
-    }, WALLET_TIMEOUT_MS)
-  })
-  try {
-    return await Promise.race([promise, timeout])
-  } finally {
-    if (timeoutId != null) window.clearTimeout(timeoutId)
-  }
+  return await requestWithAuthRetry()
 }
 
 async function withWalletTelemetryContext<T> (context: Record<string, unknown>, fn: () => Promise<T>): Promise<T> {
@@ -1426,7 +1401,7 @@ function Author ({ status }: { status: Status | null }): JSX.Element {
       try {
         const result = await withWalletTelemetryContext(
           { method: 'POST', url: `/api/me/payouts/${payout.payoutId}/internalize`, action: 'receive your payout' },
-          async () => await withWalletTimeout<{ accepted?: boolean }>((wallet as any).internalizeAction({
+          async () => (wallet as any).internalizeAction({
             tx: Utils.toArray(payout.txBase64, 'base64'),
             outputs: [{
               outputIndex: payout.outputIndex,
@@ -1439,7 +1414,7 @@ function Author ({ status }: { status: Status | null }): JSX.Element {
             }],
             description: 'PaperTrade author payout',
             labels: ['papertrade-payout']
-          }, WALLET_ORIGINATOR), 'receive your payout')
+          }, WALLET_ORIGINATOR)
         )
         if (result?.accepted !== true) throw new Error('Wallet did not accept the payout')
 
