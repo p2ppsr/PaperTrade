@@ -132,7 +132,7 @@ const METANET_EXPLORER_ANDROID_URL = 'https://play.google.com/store/apps/details
 const BSV_BROWSER_ANDROID_URL = 'https://play.google.com/store/apps/details?id=org.bsvassociation.browser'
 const BSV_BROWSER_URL = 'https://desktop.bsvb.tech/'
 const PAPERTRADE_GITHUB_URL = 'https://github.com/p2ppsr/PaperTrade'
-const WALLET_TIMEOUT_MS = 20000
+const WALLET_TIMEOUT_MS = 120000
 let walletRequestQueue: Promise<unknown> = Promise.resolve()
 let activeWalletRequestContext: Record<string, unknown> = {}
 let activeWalletRequestContextToken = 0
@@ -1071,9 +1071,15 @@ function Reader ({ status }: { status: Status | null }): JSX.Element {
 
   useEffect(() => {
     let live = true
+    let walletWaitTimer: number | undefined
     setImageUrl(null)
     setMessage('Loading page...')
     setIsLoading(true)
+    if (currentPage > 1) {
+      walletWaitTimer = window.setTimeout(() => {
+        if (live) setMessage('Waiting for wallet approval...')
+      }, 3000)
+    }
     void pageFetch(`${API}/publications/${id}/pages/${currentPage}`, currentPage)
       .then(async res => await responseToPngBlob(res, 'Page request failed', currentPage > 1))
       .then(blob => {
@@ -1096,6 +1102,7 @@ function Reader ({ status }: { status: Status | null }): JSX.Element {
       })
     return () => {
       live = false
+      if (walletWaitTimer != null) window.clearTimeout(walletWaitTimer)
     }
   }, [id, currentPage])
 
