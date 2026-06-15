@@ -301,6 +301,7 @@ function hasEmbeddedWalletBridge (): boolean {
 
 function getWalletSubstrate (): WalletSubstrate {
   if (WALLET_SUBSTRATE_OVERRIDE != null && WALLET_SUBSTRATE_OVERRIDE !== '') return WALLET_SUBSTRATE_OVERRIDE as WalletSubstrate
+  if (hasWindowCwiWalletBridge()) return 'window.CWI'
   if (hasReactNativeWalletBridge()) return 'react-native'
   return 'auto'
 }
