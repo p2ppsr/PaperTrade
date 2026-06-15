@@ -520,12 +520,18 @@ async function responseToPageImage (res: Response, fallbackMessage: string, expe
   }
   const contentType = res.headers.get('content-type') ?? ''
   if (expectJson || contentType.includes('application/json')) {
+    postTelemetry('reader.page_json_parse_started', 'info', {
+      context: { contentType }
+    })
     const json = await res.json() as Record<string, unknown>
+    postTelemetry('reader.page_json_parse_finished', 'info', {
+      context: {
+        hasImageUrl: typeof json.imageUrl === 'string',
+        hasDataBase64: typeof json.dataBase64 === 'string' && json.dataBase64 !== ''
+      }
+    })
     const mimeType = typeof json.mimeType === 'string' ? json.mimeType : ''
     const dataBase64 = typeof json.dataBase64 === 'string' ? json.dataBase64 : ''
-    if (mimeType === 'image/png' && dataBase64 !== '') {
-      return { src: `data:${mimeType};base64,${dataBase64}`, revokeOnEvict: false }
-    }
     if (typeof json.imageUrl === 'string') {
       postTelemetry('reader.page_image_url_fetch_started', 'info', {
         context: { path: new URL(absoluteRequestUrl(json.imageUrl)).pathname }
@@ -536,6 +542,9 @@ async function responseToPageImage (res: Response, fallbackMessage: string, expe
         context: { path: new URL(absoluteRequestUrl(json.imageUrl)).pathname }
       })
       return image
+    }
+    if (mimeType === 'image/png' && dataBase64 !== '') {
+      return { src: `data:${mimeType};base64,${dataBase64}`, revokeOnEvict: false }
     }
     throw new Error(`${fallbackMessage}: server did not return a rendered page image`)
   }
