@@ -74,26 +74,34 @@ index 9a0265b..2a4f93f 100644
          this.lastInteractedWithPeer = message.identityKey;
          // Dispatch callbacks
 diff --git a/node_modules/@bsv/sdk/dist/cjs/src/auth/clients/AuthFetch.js b/node_modules/@bsv/sdk/dist/cjs/src/auth/clients/AuthFetch.js
-index 105941f..b92c2a4 100644
+index 105941f..4793778 100644
 --- a/node_modules/@bsv/sdk/dist/cjs/src/auth/clients/AuthFetch.js
 +++ b/node_modules/@bsv/sdk/dist/cjs/src/auth/clients/AuthFetch.js
-@@ -157,10 +157,13 @@ class AuthFetch {
+@@ -157,10 +157,21 @@ class AuthFetch {
                      const responseReader = new Utils.Reader(payload);
                      // Deserialize first 32 bytes of payload
                      const responseNonceAsBase64 = Utils.toBase64(responseReader.read(32));
 -                    if (responseNonceAsBase64 !== requestNonceAsBase64) {
-+                    const callback = this.callbacks[responseNonceAsBase64];
++                    let callbackNonceAsBase64 = responseNonceAsBase64;
++                    let callback = this.callbacks[callbackNonceAsBase64];
++                    if (callback == null) {
++                        const pendingCallbackNonces = Object.keys(this.callbacks);
++                        if (pendingCallbackNonces.length === 1) {
++                            callbackNonceAsBase64 = pendingCallbackNonces[0];
++                            callback = this.callbacks[callbackNonceAsBase64];
++                        }
++                    }
 +                    if (callback == null) {
                          return;
                      }
 -                    peerToUse.peer.stopListeningForGeneralMessages(listenerId);
-+                    if (responseNonceAsBase64 === requestNonceAsBase64 || this.callbacks[requestNonceAsBase64] == null) {
++                    if (callbackNonceAsBase64 === requestNonceAsBase64 || this.callbacks[requestNonceAsBase64] == null) {
 +                        peerToUse.peer.stopListeningForGeneralMessages(listenerId);
 +                    }
                      // Save the identity key for the peer for future requests, since we have it here.
                      this.peers[baseURL].identityKey = senderPublicKey;
                      this.peers[baseURL].supportsMutualAuth = true;
-@@ -195,9 +198,9 @@ class AuthFetch {
+@@ -195,9 +206,9 @@ class AuthFetch {
                          headers: new Headers(responseHeaders)
                      });
                      // Resolve or reject the correct request with the response data
@@ -101,11 +109,11 @@ index 105941f..b92c2a4 100644
 +                    callback.resolve(responseValue);
                      // Clean up
 -                    delete this.callbacks[requestNonceAsBase64];
-+                    delete this.callbacks[responseNonceAsBase64];
++                    delete this.callbacks[callbackNonceAsBase64];
                  });
                  // Before sending general messages to the peer, ensure that no certificate requests are pending.
                  // This way, the user would need to choose to either allow or reject the certificate request first.
-@@ -223,6 +226,7 @@ class AuthFetch {
+@@ -223,6 +234,7 @@ class AuthFetch {
                      });
                  }
                  // Send the request, now that all listeners are set up
@@ -113,7 +121,7 @@ index 105941f..b92c2a4 100644
                  await peerToUse.peer.toPeer(writer.toArray(), peerToUse.identityKey).catch(async (error) => {
                      const isStaleSession = error.message.includes('Session not found for nonce') ||
                          (error.message.includes('without valid BSV authentication') &&
-@@ -235,23 +239,38 @@ class AuthFetch {
+@@ -235,23 +247,38 @@ class AuthFetch {
                          delete this.peers[baseURL];
                          config.retryCounter ?? (config.retryCounter = 3);
                          const response = await this.fetch(url, config);
@@ -264,26 +272,34 @@ index ed1545f..ef56746 100644
          this.lastInteractedWithPeer = message.identityKey;
          // Dispatch callbacks
 diff --git a/node_modules/@bsv/sdk/dist/esm/src/auth/clients/AuthFetch.js b/node_modules/@bsv/sdk/dist/esm/src/auth/clients/AuthFetch.js
-index 7838555..db9e07c 100644
+index 7838555..4c67b60 100644
 --- a/node_modules/@bsv/sdk/dist/esm/src/auth/clients/AuthFetch.js
 +++ b/node_modules/@bsv/sdk/dist/esm/src/auth/clients/AuthFetch.js
-@@ -122,10 +122,13 @@ export class AuthFetch {
+@@ -122,10 +122,21 @@ export class AuthFetch {
                      const responseReader = new Utils.Reader(payload);
                      // Deserialize first 32 bytes of payload
                      const responseNonceAsBase64 = Utils.toBase64(responseReader.read(32));
 -                    if (responseNonceAsBase64 !== requestNonceAsBase64) {
-+                    const callback = this.callbacks[responseNonceAsBase64];
++                    let callbackNonceAsBase64 = responseNonceAsBase64;
++                    let callback = this.callbacks[callbackNonceAsBase64];
++                    if (callback == null) {
++                        const pendingCallbackNonces = Object.keys(this.callbacks);
++                        if (pendingCallbackNonces.length === 1) {
++                            callbackNonceAsBase64 = pendingCallbackNonces[0];
++                            callback = this.callbacks[callbackNonceAsBase64];
++                        }
++                    }
 +                    if (callback == null) {
                          return;
                      }
 -                    peerToUse.peer.stopListeningForGeneralMessages(listenerId);
-+                    if (responseNonceAsBase64 === requestNonceAsBase64 || this.callbacks[requestNonceAsBase64] == null) {
++                    if (callbackNonceAsBase64 === requestNonceAsBase64 || this.callbacks[requestNonceAsBase64] == null) {
 +                        peerToUse.peer.stopListeningForGeneralMessages(listenerId);
 +                    }
                      // Save the identity key for the peer for future requests, since we have it here.
                      this.peers[baseURL].identityKey = senderPublicKey;
                      this.peers[baseURL].supportsMutualAuth = true;
-@@ -160,9 +163,9 @@ export class AuthFetch {
+@@ -160,9 +171,9 @@ export class AuthFetch {
                          headers: new Headers(responseHeaders)
                      });
                      // Resolve or reject the correct request with the response data
@@ -291,11 +307,11 @@ index 7838555..db9e07c 100644
 +                    callback.resolve(responseValue);
                      // Clean up
 -                    delete this.callbacks[requestNonceAsBase64];
-+                    delete this.callbacks[responseNonceAsBase64];
++                    delete this.callbacks[callbackNonceAsBase64];
                  });
                  // Before sending general messages to the peer, ensure that no certificate requests are pending.
                  // This way, the user would need to choose to either allow or reject the certificate request first.
-@@ -188,6 +191,7 @@ export class AuthFetch {
+@@ -188,6 +199,7 @@ export class AuthFetch {
                      });
                  }
                  // Send the request, now that all listeners are set up
@@ -303,7 +319,7 @@ index 7838555..db9e07c 100644
                  await peerToUse.peer.toPeer(writer.toArray(), peerToUse.identityKey).catch(async (error) => {
                      const isStaleSession = error.message.includes('Session not found for nonce') ||
                          (error.message.includes('without valid BSV authentication') &&
-@@ -200,23 +204,38 @@ export class AuthFetch {
+@@ -200,23 +212,38 @@ export class AuthFetch {
                          delete this.peers[baseURL];
                          config.retryCounter ??= 3;
                          const response = await this.fetch(url, config);
@@ -461,26 +477,34 @@ index c2499ab..9be1b3b 100644
      // Update lastInteractedWithPeer
      this.lastInteractedWithPeer = message.identityKey
 diff --git a/node_modules/@bsv/sdk/src/auth/clients/AuthFetch.ts b/node_modules/@bsv/sdk/src/auth/clients/AuthFetch.ts
-index 93612fc..626429a 100644
+index 93612fc..5b7db49 100644
 --- a/node_modules/@bsv/sdk/src/auth/clients/AuthFetch.ts
 +++ b/node_modules/@bsv/sdk/src/auth/clients/AuthFetch.ts
-@@ -185,10 +185,13 @@ export class AuthFetch {
+@@ -185,10 +185,21 @@ export class AuthFetch {
            const responseReader = new Utils.Reader(payload)
            // Deserialize first 32 bytes of payload
            const responseNonceAsBase64 = Utils.toBase64(responseReader.read(32))
 -          if (responseNonceAsBase64 !== requestNonceAsBase64) {
-+          const callback = this.callbacks[responseNonceAsBase64]
++          let callbackNonceAsBase64 = responseNonceAsBase64
++          let callback = this.callbacks[callbackNonceAsBase64]
++          if (callback == null) {
++            const pendingCallbackNonces = Object.keys(this.callbacks)
++            if (pendingCallbackNonces.length === 1) {
++              callbackNonceAsBase64 = pendingCallbackNonces[0]
++              callback = this.callbacks[callbackNonceAsBase64]
++            }
++          }
 +          if (callback == null) {
              return
            }
 -          peerToUse.peer.stopListeningForGeneralMessages(listenerId)
-+          if (responseNonceAsBase64 === requestNonceAsBase64 || this.callbacks[requestNonceAsBase64] == null) {
++          if (callbackNonceAsBase64 === requestNonceAsBase64 || this.callbacks[requestNonceAsBase64] == null) {
 +            peerToUse.peer.stopListeningForGeneralMessages(listenerId)
 +          }
  
            // Save the identity key for the peer for future requests, since we have it here.
            this.peers[baseURL].identityKey = senderPublicKey
-@@ -233,10 +236,10 @@ export class AuthFetch {
+@@ -233,10 +244,10 @@ export class AuthFetch {
            )
  
            // Resolve or reject the correct request with the response data
@@ -489,11 +513,11 @@ index 93612fc..626429a 100644
  
            // Clean up
 -          delete this.callbacks[requestNonceAsBase64]
-+          delete this.callbacks[responseNonceAsBase64]
++          delete this.callbacks[callbackNonceAsBase64]
          })
  
          // Before sending general messages to the peer, ensure that no certificate requests are pending.
-@@ -269,6 +272,7 @@ export class AuthFetch {
+@@ -269,6 +280,7 @@ export class AuthFetch {
          }
  
          // Send the request, now that all listeners are set up
@@ -501,7 +525,7 @@ index 93612fc..626429a 100644
          await peerToUse.peer.toPeer(writer.toArray(), peerToUse.identityKey).catch(async error => {
            const isStaleSession =
              error.message.includes('Session not found for nonce') ||
-@@ -282,21 +286,36 @@ export class AuthFetch {
+@@ -282,21 +294,36 @@ export class AuthFetch {
              delete this.peers[baseURL]
              config.retryCounter ??= 3
              const response = await this.fetch(url, config)

@@ -1902,6 +1902,7 @@ async function createApp (): Promise<express.Express> {
       }
       const publicationId = req.path.match(/^\/publication\/([^/]+)$/)?.[1]
       const publication = publicationId == null ? null : await getPublishedPublicationMeta(publicationId)
+      res.setHeader('Cache-Control', 'no-store')
       res.type('html').send(renderHtmlShell(await indexHtml(), metaForPath(req.path, publication, appearanceFromSettings(await getSettings()))))
     } catch (err) {
       next(err)
