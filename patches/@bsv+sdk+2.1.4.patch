@@ -73,6 +73,54 @@ index 9a0265b..2a4f93f 100644
          // Update lastInteractedWithPeer
          this.lastInteractedWithPeer = message.identityKey;
          // Dispatch callbacks
+diff --git a/node_modules/@bsv/sdk/dist/cjs/src/auth/clients/AuthFetch.js b/node_modules/@bsv/sdk/dist/cjs/src/auth/clients/AuthFetch.js
+index 105941f..27664a1 100644
+--- a/node_modules/@bsv/sdk/dist/cjs/src/auth/clients/AuthFetch.js
++++ b/node_modules/@bsv/sdk/dist/cjs/src/auth/clients/AuthFetch.js
+@@ -223,6 +223,7 @@ class AuthFetch {
+                     });
+                 }
+                 // Send the request, now that all listeners are set up
++                let handledRetry = false;
+                 await peerToUse.peer.toPeer(writer.toArray(), peerToUse.identityKey).catch(async (error) => {
+                     const isStaleSession = error.message.includes('Session not found for nonce') ||
+                         (error.message.includes('without valid BSV authentication') &&
+@@ -235,23 +236,35 @@ class AuthFetch {
+                         delete this.peers[baseURL];
+                         config.retryCounter ?? (config.retryCounter = 3);
+                         const response = await this.fetch(url, config);
++                        handledRetry = true;
+                         resolve(response);
+                         return;
+                     }
+                     if (error.message.includes('HTTP server failed to authenticate')) {
+                         try {
+                             const response = await this.handleFetchAndValidate(url, config, peerToUse);
++                            handledRetry = true;
+                             resolve(response);
+                             return;
+                         }
+                         catch (fetchError) {
++                            handledRetry = true;
+                             reject(fetchError);
+                         }
+                     }
+                     else {
++                        handledRetry = true;
+                         reject(error);
+                     }
+                 });
++                if (!handledRetry && this.callbacks[requestNonceAsBase64] != null) {
++                    peerToUse.peer.stopListeningForGeneralMessages(listenerId);
++                    delete this.callbacks[requestNonceAsBase64];
++                    delete this.peers[baseURL];
++                    config.retryCounter ?? (config.retryCounter = 3);
++                    const response = await this.fetch(url, config);
++                    resolve(response);
++                }
+             }
+             catch (e) {
+                 reject(e);
 diff --git a/node_modules/@bsv/sdk/dist/cjs/src/auth/transports/SimplifiedFetchTransport.js b/node_modules/@bsv/sdk/dist/cjs/src/auth/transports/SimplifiedFetchTransport.js
 index 4d5f3e2..01920dc 100644
 --- a/node_modules/@bsv/sdk/dist/cjs/src/auth/transports/SimplifiedFetchTransport.js
@@ -184,6 +232,54 @@ index ed1545f..ef56746 100644
          // Update lastInteractedWithPeer
          this.lastInteractedWithPeer = message.identityKey;
          // Dispatch callbacks
+diff --git a/node_modules/@bsv/sdk/dist/esm/src/auth/clients/AuthFetch.js b/node_modules/@bsv/sdk/dist/esm/src/auth/clients/AuthFetch.js
+index 7838555..7ebccb0 100644
+--- a/node_modules/@bsv/sdk/dist/esm/src/auth/clients/AuthFetch.js
++++ b/node_modules/@bsv/sdk/dist/esm/src/auth/clients/AuthFetch.js
+@@ -188,6 +188,7 @@ export class AuthFetch {
+                     });
+                 }
+                 // Send the request, now that all listeners are set up
++                let handledRetry = false;
+                 await peerToUse.peer.toPeer(writer.toArray(), peerToUse.identityKey).catch(async (error) => {
+                     const isStaleSession = error.message.includes('Session not found for nonce') ||
+                         (error.message.includes('without valid BSV authentication') &&
+@@ -200,23 +201,35 @@ export class AuthFetch {
+                         delete this.peers[baseURL];
+                         config.retryCounter ??= 3;
+                         const response = await this.fetch(url, config);
++                        handledRetry = true;
+                         resolve(response);
+                         return;
+                     }
+                     if (error.message.includes('HTTP server failed to authenticate')) {
+                         try {
+                             const response = await this.handleFetchAndValidate(url, config, peerToUse);
++                            handledRetry = true;
+                             resolve(response);
+                             return;
+                         }
+                         catch (fetchError) {
++                            handledRetry = true;
+                             reject(fetchError);
+                         }
+                     }
+                     else {
++                        handledRetry = true;
+                         reject(error);
+                     }
+                 });
++                if (!handledRetry && this.callbacks[requestNonceAsBase64] != null) {
++                    peerToUse.peer.stopListeningForGeneralMessages(listenerId);
++                    delete this.callbacks[requestNonceAsBase64];
++                    delete this.peers[baseURL];
++                    config.retryCounter ??= 3;
++                    const response = await this.fetch(url, config);
++                    resolve(response);
++                }
+             }
+             catch (e) {
+                 reject(e);
 diff --git a/node_modules/@bsv/sdk/dist/esm/src/auth/transports/SimplifiedFetchTransport.js b/node_modules/@bsv/sdk/dist/esm/src/auth/transports/SimplifiedFetchTransport.js
 index 314b7d0..d0603ef 100644
 --- a/node_modules/@bsv/sdk/dist/esm/src/auth/transports/SimplifiedFetchTransport.js
@@ -302,6 +398,52 @@ index c2499ab..9be1b3b 100644
  
      // Update lastInteractedWithPeer
      this.lastInteractedWithPeer = message.identityKey
+diff --git a/node_modules/@bsv/sdk/src/auth/clients/AuthFetch.ts b/node_modules/@bsv/sdk/src/auth/clients/AuthFetch.ts
+index 93612fc..76f351e 100644
+--- a/node_modules/@bsv/sdk/src/auth/clients/AuthFetch.ts
++++ b/node_modules/@bsv/sdk/src/auth/clients/AuthFetch.ts
+@@ -269,6 +269,7 @@ export class AuthFetch {
+         }
+ 
+         // Send the request, now that all listeners are set up
++        let handledRetry = false
+         await peerToUse.peer.toPeer(writer.toArray(), peerToUse.identityKey).catch(async error => {
+           const isStaleSession =
+             error.message.includes('Session not found for nonce') ||
+@@ -282,21 +283,33 @@ export class AuthFetch {
+             delete this.peers[baseURL]
+             config.retryCounter ??= 3
+             const response = await this.fetch(url, config)
++            handledRetry = true
+             resolve(response)
+             return
+           }
+           if (error.message.includes('HTTP server failed to authenticate')) {
+             try {
+               const response = await this.handleFetchAndValidate(url, config, peerToUse)
++              handledRetry = true
+               resolve(response)
+               return
+             } catch (fetchError) {
++              handledRetry = true
+               reject(fetchError)
+             }
+           } else {
++            handledRetry = true
+             reject(error)
+           }
+         })
++        if (!handledRetry && this.callbacks[requestNonceAsBase64] != null) {
++          peerToUse.peer.stopListeningForGeneralMessages(listenerId)
++          delete this.callbacks[requestNonceAsBase64]
++          delete this.peers[baseURL]
++          config.retryCounter ??= 3
++          const response = await this.fetch(url, config)
++          resolve(response)
++        }
+       } catch (e) {
+         reject(e)
+       }
 diff --git a/node_modules/@bsv/sdk/src/auth/transports/SimplifiedFetchTransport.ts b/node_modules/@bsv/sdk/src/auth/transports/SimplifiedFetchTransport.ts
 index 40b2f42..3648f18 100644
 --- a/node_modules/@bsv/sdk/src/auth/transports/SimplifiedFetchTransport.ts
