@@ -375,6 +375,12 @@ async function sharePaperTrade ({ title, text, path }: { title: string, text: st
   return 'Link copied.'
 }
 
+function isAbortError (err: unknown): boolean {
+  return err instanceof DOMException
+    ? err.name === 'AbortError'
+    : err instanceof Error && err.name === 'AbortError'
+}
+
 async function authFetch (url: string, init?: RequestInit, action = 'complete this wallet request'): Promise<Response> {
   const request = async (): Promise<Response> => {
     const startedAt = performance.now()
@@ -401,6 +407,17 @@ async function authFetch (url: string, init?: RequestInit, action = 'complete th
       })
       return response
     } catch (err) {
+      if (isAbortError(err)) {
+        postTelemetry('wallet.request_aborted', 'info', {
+          durationMs: performance.now() - startedAt,
+          context: {
+            method,
+            url: new URL(requestUrl).pathname,
+            action
+          }
+        })
+        throw err
+      }
       const normalized = normalizeWalletTransportError(err)
       postTelemetry('wallet.request_failed', 'error', {
         durationMs: performance.now() - startedAt,
@@ -448,8 +465,8 @@ async function withWalletTelemetryContext<T> (context: Record<string, unknown>, 
   }
 }
 
-async function protectedPageFetch (url: string): Promise<Response> {
-  return await authFetch(url, undefined, 'unlock this page')
+async function protectedPageFetch (url: string, signal?: AbortSignal): Promise<Response> {
+  return await authFetch(url, signal == null ? undefined : { signal }, 'unlock this page')
 }
 
 function withFormatJson (url: string): string {
@@ -480,9 +497,9 @@ function cachedReaderPageBlob (publicationId: string, pageNumber: number): Blob 
   return blob
 }
 
-async function pageFetch (url: string, pageNumber: number): Promise<Response> {
-  if (pageNumber === 1) return await fetch(url)
-  return await protectedPageFetch(withFormatJson(url))
+async function pageFetch (url: string, pageNumber: number, signal?: AbortSignal): Promise<Response> {
+  if (pageNumber === 1) return await fetch(url, signal == null ? undefined : { signal })
+  return await protectedPageFetch(withFormatJson(url), signal)
 }
 
 function base64ToBlob (base64: string, mimeType: string): Blob {
@@ -492,7 +509,7 @@ function base64ToBlob (base64: string, mimeType: string): Blob {
   return new Blob([bytes], { type: mimeType })
 }
 
-async function responseToPngBlob (res: Response, fallbackMessage: string, expectJson = false): Promise<Blob> {
+async function responseToPngBlob (res: Response, fallbackMessage: string, expectJson = false, signal?: AbortSignal): Promise<Blob> {
   if (!res.ok) {
     const json = await res.json().catch(() => ({}))
     throw new Error(json.message ?? json.description ?? `${fallbackMessage} with HTTP ${res.status}`)
@@ -501,7 +518,7 @@ async function responseToPngBlob (res: Response, fallbackMessage: string, expect
   if (expectJson || contentType.includes('application/json')) {
     const json = await res.json()
     if (typeof json.imageUrl === 'string') {
-      const imageResponse = await fetch(absoluteRequestUrl(json.imageUrl), { cache: 'no-store' })
+      const imageResponse = await fetch(absoluteRequestUrl(json.imageUrl), { cache: 'no-store', signal })
       return await responseToPngBlob(imageResponse, fallbackMessage)
     }
     if (json.mimeType !== 'image/png' || typeof json.dataBase64 !== 'string') {
@@ -1109,6 +1126,7 @@ function Reader ({ status }: { status: Status | null }): JSX.Element {
 
   useEffect(() => {
     let live = true
+    const controller = new AbortController()
     let walletWaitTimer: number | undefined
     let objectUrl: string | undefined
     const clearWalletWaitTimer = (): void => {
@@ -1147,15 +1165,15 @@ function Reader ({ status }: { status: Status | null }): JSX.Element {
         if (live) setMessage('Waiting for wallet approval...')
       }, 3000)
     }
-    void pageFetch(`${API}/publications/${id}/pages/${currentPage}`, currentPage)
-      .then(async res => await responseToPngBlob(res, 'Page request failed', currentPage > 1))
+    void pageFetch(`${API}/publications/${id}/pages/${currentPage}`, currentPage, controller.signal)
+      .then(async res => await responseToPngBlob(res, 'Page request failed', currentPage > 1, controller.signal))
       .then(blob => {
         if (!live) return
         rememberReaderPageBlob(id, currentPage, blob)
         renderBlob(blob, false)
       })
       .catch(err => {
-        if (!live) return
+        if (!live || isAbortError(err)) return
         clearWalletWaitTimer()
         const nextMessage = friendlyErrorMessage(err, 'Unable to load page')
         setMessage(nextMessage)
@@ -1164,6 +1182,7 @@ function Reader ({ status }: { status: Status | null }): JSX.Element {
       })
     return () => {
       live = false
+      controller.abort()
       clearWalletWaitTimer()
       if (objectUrl != null) URL.revokeObjectURL(objectUrl)
     }
@@ -1196,10 +1215,11 @@ function AuthorPreview (): JSX.Element {
 
   useEffect(() => {
     let live = true
+    const controller = new AbortController()
     setImageUrl(null)
     setMessage('Loading preview...')
-    void authFetch(withFormatJson(`${API}/me/publications/${id}/pages/${currentPage}`), undefined, 'load publication preview')
-      .then(async res => await responseToPngBlob(res, 'Preview failed', true))
+    void authFetch(withFormatJson(`${API}/me/publications/${id}/pages/${currentPage}`), { signal: controller.signal }, 'load publication preview')
+      .then(async res => await responseToPngBlob(res, 'Preview failed', true, controller.signal))
       .then(blob => {
         if (!live) return
         setImageUrl(URL.createObjectURL(blob))
@@ -1207,12 +1227,15 @@ function AuthorPreview (): JSX.Element {
         postSignal('author.preview_loaded', usercomMetadata({ surface: 'author_preview', tags: ['author'], context: { publicationId: id, pageNumber: currentPage } }))
       })
       .catch(err => {
-        if (!live) return
+        if (!live || isAbortError(err)) return
         const nextMessage = friendlyErrorMessage(err, 'Unable to load preview')
         setMessage(nextMessage)
         postSignal('author.preview_failed', usercomMetadata({ surface: 'author_preview', tags: ['error'], context: { publicationId: id, pageNumber: currentPage, message: nextMessage } }))
       })
-    return () => { live = false }
+    return () => {
+      live = false
+      controller.abort()
+    }
   }, [id, currentPage])
 
   return (
