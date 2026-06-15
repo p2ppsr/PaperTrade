@@ -1,3 +1,18 @@
+diff --git a/node_modules/@bsv/sdk/dist/cjs/src/auth/Peer.js b/node_modules/@bsv/sdk/dist/cjs/src/auth/Peer.js
+index 9a0265b..a2efa68 100644
+--- a/node_modules/@bsv/sdk/dist/cjs/src/auth/Peer.js
++++ b/node_modules/@bsv/sdk/dist/cjs/src/auth/Peer.js
+@@ -298,8 +298,9 @@ class Peer {
+             initialNonce: sessionNonce,
+             requestedCertificates: this.certificatesToRequest
+         };
++        const initialResponse = this.waitForInitialResponse(sessionNonce);
+         await this.transport.send(initialRequest);
+-        return await this.waitForInitialResponse(sessionNonce);
++        return await initialResponse;
+     }
+     /**
+      * Waits for the initial response from the peer after sending an initial handshake request message.
 diff --git a/node_modules/@bsv/sdk/dist/cjs/src/auth/transports/SimplifiedFetchTransport.js b/node_modules/@bsv/sdk/dist/cjs/src/auth/transports/SimplifiedFetchTransport.js
 index 4d5f3e2..01920dc 100644
 --- a/node_modules/@bsv/sdk/dist/cjs/src/auth/transports/SimplifiedFetchTransport.js
@@ -34,6 +49,21 @@ index 4d5f3e2..01920dc 100644
          };
      }
      createNetworkError(url, originalError) {
+diff --git a/node_modules/@bsv/sdk/dist/esm/src/auth/Peer.js b/node_modules/@bsv/sdk/dist/esm/src/auth/Peer.js
+index ed1545f..14ec263 100644
+--- a/node_modules/@bsv/sdk/dist/esm/src/auth/Peer.js
++++ b/node_modules/@bsv/sdk/dist/esm/src/auth/Peer.js
+@@ -291,8 +291,9 @@ export class Peer {
+             initialNonce: sessionNonce,
+             requestedCertificates: this.certificatesToRequest
+         };
++        const initialResponse = this.waitForInitialResponse(sessionNonce);
+         await this.transport.send(initialRequest);
+-        return await this.waitForInitialResponse(sessionNonce);
++        return await initialResponse;
+     }
+     /**
+      * Waits for the initial response from the peer after sending an initial handshake request message.
 diff --git a/node_modules/@bsv/sdk/dist/esm/src/auth/transports/SimplifiedFetchTransport.js b/node_modules/@bsv/sdk/dist/esm/src/auth/transports/SimplifiedFetchTransport.js
 index 314b7d0..d0603ef 100644
 --- a/node_modules/@bsv/sdk/dist/esm/src/auth/transports/SimplifiedFetchTransport.js
@@ -70,6 +100,21 @@ index 314b7d0..d0603ef 100644
          };
      }
      createNetworkError(url, originalError) {
+diff --git a/node_modules/@bsv/sdk/src/auth/Peer.ts b/node_modules/@bsv/sdk/src/auth/Peer.ts
+index c2499ab..d61552a 100644
+--- a/node_modules/@bsv/sdk/src/auth/Peer.ts
++++ b/node_modules/@bsv/sdk/src/auth/Peer.ts
+@@ -394,8 +394,9 @@ export class Peer {
+       requestedCertificates: this.certificatesToRequest
+     }
+ 
++    const initialResponse = this.waitForInitialResponse(sessionNonce)
+     await this.transport.send(initialRequest)
+-    return await this.waitForInitialResponse(sessionNonce)
++    return await initialResponse
+   }
+ 
+   /**
 diff --git a/node_modules/@bsv/sdk/src/auth/transports/SimplifiedFetchTransport.ts b/node_modules/@bsv/sdk/src/auth/transports/SimplifiedFetchTransport.ts
 index 40b2f42..3648f18 100644
 --- a/node_modules/@bsv/sdk/src/auth/transports/SimplifiedFetchTransport.ts
