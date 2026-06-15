@@ -556,9 +556,11 @@ async function sendPublicationPageImage (
       expiresAt,
       nonce: randomUUID()
     })
+    const imageBytes = await fs.readFile(String(page.image_path))
     res.json({
       status: 'success',
       mimeType: 'image/png',
+      dataBase64: imageBytes.toString('base64'),
       imageUrl: `${ROUTING_PREFIX}/publications/${String(publication.id)}/pages/${pageNumber}/rendered?token=${encodeURIComponent(token)}`,
       expiresAt
     })

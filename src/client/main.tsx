@@ -517,14 +517,21 @@ async function responseToPngBlob (res: Response, fallbackMessage: string, expect
   const contentType = res.headers.get('content-type') ?? ''
   if (expectJson || contentType.includes('application/json')) {
     const json = await res.json()
+    if (json.mimeType === 'image/png' && typeof json.dataBase64 === 'string') {
+      return base64ToBlob(json.dataBase64, json.mimeType)
+    }
     if (typeof json.imageUrl === 'string') {
+      postTelemetry('reader.page_image_url_fetch_started', 'info', {
+        context: { path: new URL(absoluteRequestUrl(json.imageUrl)).pathname }
+      })
       const imageResponse = await fetch(absoluteRequestUrl(json.imageUrl), { cache: 'no-store', signal })
-      return await responseToPngBlob(imageResponse, fallbackMessage)
+      const blob = await responseToPngBlob(imageResponse, fallbackMessage)
+      postTelemetry('reader.page_image_url_fetch_finished', 'info', {
+        context: { path: new URL(absoluteRequestUrl(json.imageUrl)).pathname }
+      })
+      return blob
     }
-    if (json.mimeType !== 'image/png' || typeof json.dataBase64 !== 'string') {
-      throw new Error(`${fallbackMessage}: server did not return a rendered page image`)
-    }
-    return base64ToBlob(json.dataBase64, json.mimeType)
+    throw new Error(`${fallbackMessage}: server did not return a rendered page image`)
   }
   const blob = await res.blob()
   const header = new Uint8Array(await blob.slice(0, 8).arrayBuffer())
@@ -1166,7 +1173,11 @@ function Reader ({ status }: { status: Status | null }): JSX.Element {
       }, 3000)
     }
     void pageFetch(`${API}/publications/${id}/pages/${currentPage}`, currentPage, controller.signal)
-      .then(async res => await responseToPngBlob(res, 'Page request failed', currentPage > 1, controller.signal))
+      .then(async res => {
+        clearWalletWaitTimer()
+        if (live && currentPage > 1) setMessage('Loading rendered page...')
+        return await responseToPngBlob(res, 'Page request failed', currentPage > 1, controller.signal)
+      })
       .then(blob => {
         if (!live) return
         rememberReaderPageBlob(id, currentPage, blob)
