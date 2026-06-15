@@ -7,7 +7,7 @@ import path from 'path'
 import fs from 'fs/promises'
 import { fileURLToPath } from 'url'
 import { createHash, createHmac, randomUUID, timingSafeEqual } from 'crypto'
-import { P2PKH, PublicKey, Random, SessionManager, Utils } from '@bsv/sdk'
+import { P2PKH, PublicKey, Random, Utils } from '@bsv/sdk'
 import { createAuthMiddleware } from '@bsv/auth-express-middleware'
 import { createPaymentMiddleware } from '@bsv/payment-express-middleware'
 import { db, getSettings, isAdmin, writeAudit } from './db.js'
@@ -30,35 +30,6 @@ const BRC29_PROTOCOL_ID = [2, '3241645161d8'] as const
 const AUTHOR_PAYOUT_PENDING_STATUSES = ['creating', 'pending_internalize']
 const WALLET_BALANCE_BASKET = '893b7646de0e1c9f741bd6e9169b76a8847ae34adef7bef1e6a285371206d2e8'
 const PAGE_ACCESS_TOKEN_TTL_MS = 90 * 1000
-
-class SingleActiveIdentitySessionManager extends SessionManager {
-  private readonly identityToSessionNonce = new Map<string, string>()
-
-  addSession (session: any): void {
-    const identityKey = typeof session.peerIdentityKey === 'string' ? session.peerIdentityKey : undefined
-    const sessionNonce = typeof session.sessionNonce === 'string' ? session.sessionNonce : undefined
-
-    if (identityKey != null && sessionNonce != null) {
-      const previousNonce = this.identityToSessionNonce.get(identityKey)
-      if (previousNonce != null && previousNonce !== sessionNonce) {
-        const previousSession = super.getSession(previousNonce)
-        if (previousSession != null) super.removeSession(previousSession)
-      }
-      this.identityToSessionNonce.set(identityKey, sessionNonce)
-    }
-
-    super.addSession(session)
-  }
-
-  removeSession (session: any): void {
-    const identityKey = typeof session.peerIdentityKey === 'string' ? session.peerIdentityKey : undefined
-    const sessionNonce = typeof session.sessionNonce === 'string' ? session.sessionNonce : undefined
-    super.removeSession(session)
-    if (identityKey != null && sessionNonce != null && this.identityToSessionNonce.get(identityKey) === sessionNonce) {
-      this.identityToSessionNonce.delete(identityKey)
-    }
-  }
-}
 
 interface AuthenticatedRequest extends Request {
   auth?: { identityKey: string }
@@ -1043,8 +1014,7 @@ async function createApp (): Promise<express.Express> {
 
   app.use(createAuthMiddleware({
     wallet: walletBootstrap.wallet,
-    allowUnauthenticated: true,
-    sessionManager: new SingleActiveIdentitySessionManager() as any
+    allowUnauthenticated: true
   }))
 
   const pagePaymentMiddleware = createPaymentMiddleware({
