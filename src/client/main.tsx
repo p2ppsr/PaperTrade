@@ -137,7 +137,11 @@ let activeWalletRequestContextToken = 0
 let cachedWalletSubstrate: WalletSubstrate | null = null
 let cachedWallet: WalletClient | null = null
 let cachedAuthFetch: AuthFetch | null = null
-const readerPageBlobCache = new Map<string, Blob>()
+interface ReaderPageImage {
+  src: string
+  revokeOnEvict: boolean
+}
+const readerPageImageCache = new Map<string, ReaderPageImage>()
 const READER_PAGE_BLOB_CACHE_LIMIT = 50
 const TELEMETRIED_WALLET_METHODS = new Set([
   'getPublicKey',
@@ -477,24 +481,30 @@ function readerPageCacheKey (publicationId: string, pageNumber: number): string 
   return `${publicationId}:${pageNumber}`
 }
 
-function rememberReaderPageBlob (publicationId: string, pageNumber: number, blob: Blob): void {
+function revokeReaderPageImage (image: ReaderPageImage | undefined): void {
+  if (image?.revokeOnEvict === true) URL.revokeObjectURL(image.src)
+}
+
+function rememberReaderPageImage (publicationId: string, pageNumber: number, image: ReaderPageImage): void {
   const key = readerPageCacheKey(publicationId, pageNumber)
-  readerPageBlobCache.delete(key)
-  readerPageBlobCache.set(key, blob)
-  while (readerPageBlobCache.size > READER_PAGE_BLOB_CACHE_LIMIT) {
-    const oldest = readerPageBlobCache.keys().next().value
+  revokeReaderPageImage(readerPageImageCache.get(key))
+  readerPageImageCache.delete(key)
+  readerPageImageCache.set(key, image)
+  while (readerPageImageCache.size > READER_PAGE_BLOB_CACHE_LIMIT) {
+    const oldest = readerPageImageCache.keys().next().value
     if (oldest == null) break
-    readerPageBlobCache.delete(oldest)
+    revokeReaderPageImage(readerPageImageCache.get(oldest))
+    readerPageImageCache.delete(oldest)
   }
 }
 
-function cachedReaderPageBlob (publicationId: string, pageNumber: number): Blob | undefined {
+function cachedReaderPageImage (publicationId: string, pageNumber: number): ReaderPageImage | undefined {
   const key = readerPageCacheKey(publicationId, pageNumber)
-  const blob = readerPageBlobCache.get(key)
-  if (blob == null) return undefined
-  readerPageBlobCache.delete(key)
-  readerPageBlobCache.set(key, blob)
-  return blob
+  const image = readerPageImageCache.get(key)
+  if (image == null) return undefined
+  readerPageImageCache.delete(key)
+  readerPageImageCache.set(key, image)
+  return image
 }
 
 async function pageFetch (url: string, pageNumber: number, signal?: AbortSignal): Promise<Response> {
@@ -502,14 +512,7 @@ async function pageFetch (url: string, pageNumber: number, signal?: AbortSignal)
   return await protectedPageFetch(withFormatJson(url), signal)
 }
 
-function base64ToBlob (base64: string, mimeType: string): Blob {
-  const binary = atob(base64)
-  const bytes = new Uint8Array(binary.length)
-  for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i)
-  return new Blob([bytes], { type: mimeType })
-}
-
-async function responseToPngBlob (res: Response, fallbackMessage: string, expectJson = false, signal?: AbortSignal): Promise<Blob> {
+async function responseToPageImage (res: Response, fallbackMessage: string, expectJson = false, signal?: AbortSignal): Promise<ReaderPageImage> {
   if (!res.ok) {
     const json = await res.json().catch(() => ({}))
     throw new Error(json.message ?? json.description ?? `${fallbackMessage} with HTTP ${res.status}`)
@@ -518,18 +521,18 @@ async function responseToPngBlob (res: Response, fallbackMessage: string, expect
   if (expectJson || contentType.includes('application/json')) {
     const json = await res.json()
     if (json.mimeType === 'image/png' && typeof json.dataBase64 === 'string') {
-      return base64ToBlob(json.dataBase64, json.mimeType)
+      return { src: `data:${json.mimeType};base64,${json.dataBase64}`, revokeOnEvict: false }
     }
     if (typeof json.imageUrl === 'string') {
       postTelemetry('reader.page_image_url_fetch_started', 'info', {
         context: { path: new URL(absoluteRequestUrl(json.imageUrl)).pathname }
       })
       const imageResponse = await fetch(absoluteRequestUrl(json.imageUrl), { cache: 'no-store', signal })
-      const blob = await responseToPngBlob(imageResponse, fallbackMessage)
+      const image = await responseToPageImage(imageResponse, fallbackMessage)
       postTelemetry('reader.page_image_url_fetch_finished', 'info', {
         context: { path: new URL(absoluteRequestUrl(json.imageUrl)).pathname }
       })
-      return blob
+      return image
     }
     throw new Error(`${fallbackMessage}: server did not return a rendered page image`)
   }
@@ -545,7 +548,7 @@ async function responseToPngBlob (res: Response, fallbackMessage: string, expect
     header[6] === 0x1a &&
     header[7] === 0x0a
   if (!isPng) throw new Error(`${fallbackMessage}: server did not return a rendered page image`)
-  return blob
+  return { src: URL.createObjectURL(blob), revokeOnEvict: true }
 }
 
 function randomId (): string {
@@ -1135,18 +1138,15 @@ function Reader ({ status }: { status: Status | null }): JSX.Element {
     let live = true
     const controller = new AbortController()
     let walletWaitTimer: number | undefined
-    let objectUrl: string | undefined
     const clearWalletWaitTimer = (): void => {
       if (walletWaitTimer != null) {
         window.clearTimeout(walletWaitTimer)
         walletWaitTimer = undefined
       }
     }
-    const renderBlob = (blob: Blob, cacheHit: boolean): void => {
+    const renderImage = (image: ReaderPageImage, cacheHit: boolean): void => {
       clearWalletWaitTimer()
-      if (objectUrl != null) URL.revokeObjectURL(objectUrl)
-      objectUrl = URL.createObjectURL(blob)
-      setImageUrl(objectUrl)
+      setImageUrl(image.src)
       setMessage('')
       setIsLoading(false)
       postSignal('reader.page_loaded', usercomMetadata({
@@ -1156,32 +1156,31 @@ function Reader ({ status }: { status: Status | null }): JSX.Element {
       }))
     }
     setImageUrl(null)
-    setMessage('Loading page...')
+    setMessage(currentPage > 1 ? 'Unlocking page...' : 'Loading page...')
     setIsLoading(true)
-    const cachedBlob = cachedReaderPageBlob(id, currentPage)
-    if (cachedBlob != null) {
-      renderBlob(cachedBlob, true)
+    const cachedImage = cachedReaderPageImage(id, currentPage)
+    if (cachedImage != null) {
+      renderImage(cachedImage, true)
       return () => {
         live = false
         clearWalletWaitTimer()
-        if (objectUrl != null) URL.revokeObjectURL(objectUrl)
       }
     }
     if (currentPage > 1) {
       walletWaitTimer = window.setTimeout(() => {
-        if (live) setMessage('Waiting for wallet approval...')
+        if (live) setMessage('Unlocking page...')
       }, 3000)
     }
     void pageFetch(`${API}/publications/${id}/pages/${currentPage}`, currentPage, controller.signal)
       .then(async res => {
         clearWalletWaitTimer()
         if (live && currentPage > 1) setMessage('Loading rendered page...')
-        return await responseToPngBlob(res, 'Page request failed', currentPage > 1, controller.signal)
+        return await responseToPageImage(res, 'Page request failed', currentPage > 1, controller.signal)
       })
-      .then(blob => {
+      .then(image => {
         if (!live) return
-        rememberReaderPageBlob(id, currentPage, blob)
-        renderBlob(blob, false)
+        rememberReaderPageImage(id, currentPage, image)
+        renderImage(image, false)
       })
       .catch(err => {
         if (!live || isAbortError(err)) return
@@ -1195,7 +1194,6 @@ function Reader ({ status }: { status: Status | null }): JSX.Element {
       live = false
       controller.abort()
       clearWalletWaitTimer()
-      if (objectUrl != null) URL.revokeObjectURL(objectUrl)
     }
   }, [id, currentPage])
 
@@ -1227,13 +1225,15 @@ function AuthorPreview (): JSX.Element {
   useEffect(() => {
     let live = true
     const controller = new AbortController()
+    let previewImage: ReaderPageImage | undefined
     setImageUrl(null)
     setMessage('Loading preview...')
     void authFetch(withFormatJson(`${API}/me/publications/${id}/pages/${currentPage}`), { signal: controller.signal }, 'load publication preview')
-      .then(async res => await responseToPngBlob(res, 'Preview failed', true, controller.signal))
-      .then(blob => {
+      .then(async res => await responseToPageImage(res, 'Preview failed', true, controller.signal))
+      .then(image => {
         if (!live) return
-        setImageUrl(URL.createObjectURL(blob))
+        previewImage = image
+        setImageUrl(image.src)
         setMessage('')
         postSignal('author.preview_loaded', usercomMetadata({ surface: 'author_preview', tags: ['author'], context: { publicationId: id, pageNumber: currentPage } }))
       })
@@ -1246,6 +1246,7 @@ function AuthorPreview (): JSX.Element {
     return () => {
       live = false
       controller.abort()
+      revokeReaderPageImage(previewImage)
     }
   }, [id, currentPage])
 
