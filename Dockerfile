@@ -3,6 +3,7 @@ FROM node:22-bookworm-slim AS build
 WORKDIR /app
 ENV NPM_CONFIG_LEGACY_PEER_DEPS=true
 COPY package*.json ./
+COPY patches ./patches
 RUN npm ci && npm cache clean --force
 COPY . .
 RUN npm run build
@@ -15,6 +16,7 @@ WORKDIR /app
 ENV NPM_CONFIG_LEGACY_PEER_DEPS=true
 
 COPY package*.json ./
+COPY patches ./patches
 RUN npm ci --omit=dev && npm cache clean --force
 COPY --from=build /app/build ./build
 COPY --from=build /app/dist ./dist
