@@ -1,0 +1,117 @@
+diff --git a/node_modules/@bsv/sdk/dist/cjs/src/auth/transports/SimplifiedFetchTransport.js b/node_modules/@bsv/sdk/dist/cjs/src/auth/transports/SimplifiedFetchTransport.js
+index 4d5f3e2..01920dc 100644
+--- a/node_modules/@bsv/sdk/dist/cjs/src/auth/transports/SimplifiedFetchTransport.js
++++ b/node_modules/@bsv/sdk/dist/cjs/src/auth/transports/SimplifiedFetchTransport.js
+@@ -101,7 +101,7 @@ class SimplifiedFetchTransport {
+                         }
+                         if (this.onDataCallback != null) {
+                             const responseMessage = await response.json();
+-                            this.onDataCallback(responseMessage);
++                            await this.onDataCallback(responseMessage);
+                         }
+                         if (message.messageType === 'initialRequest') {
+                             resolve();
+@@ -239,7 +239,7 @@ class SimplifiedFetchTransport {
+                 throw this.createUnauthenticatedResponseError(url, response, responseBodyArray);
+             }
+             // Handle the response if data is received and callback is set
+-            this.onDataCallback(responseMessage);
++            await this.onDataCallback(responseMessage);
+         }
+     }
+     /**
+@@ -250,11 +250,8 @@ class SimplifiedFetchTransport {
+      * @returns A promise that resolves once the callback is set.
+      */
+     async onData(callback) {
+-        this.onDataCallback = (m) => {
+-            void callback(m).catch(() => {
+-                // Errors from handleIncomingMessage on the client side are not
+-                // actionable here — prevent unhandled promise rejections.
+-            });
++        this.onDataCallback = async (m) => {
++            await callback(m);
+         };
+     }
+     createNetworkError(url, originalError) {
+diff --git a/node_modules/@bsv/sdk/dist/esm/src/auth/transports/SimplifiedFetchTransport.js b/node_modules/@bsv/sdk/dist/esm/src/auth/transports/SimplifiedFetchTransport.js
+index 314b7d0..d0603ef 100644
+--- a/node_modules/@bsv/sdk/dist/esm/src/auth/transports/SimplifiedFetchTransport.js
++++ b/node_modules/@bsv/sdk/dist/esm/src/auth/transports/SimplifiedFetchTransport.js
+@@ -68,7 +68,7 @@ export class SimplifiedFetchTransport {
+                         }
+                         if (this.onDataCallback != null) {
+                             const responseMessage = await response.json();
+-                            this.onDataCallback(responseMessage);
++                            await this.onDataCallback(responseMessage);
+                         }
+                         if (message.messageType === 'initialRequest') {
+                             resolve();
+@@ -206,7 +206,7 @@ export class SimplifiedFetchTransport {
+                 throw this.createUnauthenticatedResponseError(url, response, responseBodyArray);
+             }
+             // Handle the response if data is received and callback is set
+-            this.onDataCallback(responseMessage);
++            await this.onDataCallback(responseMessage);
+         }
+     }
+     /**
+@@ -217,11 +217,8 @@ export class SimplifiedFetchTransport {
+      * @returns A promise that resolves once the callback is set.
+      */
+     async onData(callback) {
+-        this.onDataCallback = (m) => {
+-            void callback(m).catch(() => {
+-                // Errors from handleIncomingMessage on the client side are not
+-                // actionable here — prevent unhandled promise rejections.
+-            });
++        this.onDataCallback = async (m) => {
++            await callback(m);
+         };
+     }
+     createNetworkError(url, originalError) {
+diff --git a/node_modules/@bsv/sdk/src/auth/transports/SimplifiedFetchTransport.ts b/node_modules/@bsv/sdk/src/auth/transports/SimplifiedFetchTransport.ts
+index 40b2f42..3648f18 100644
+--- a/node_modules/@bsv/sdk/src/auth/transports/SimplifiedFetchTransport.ts
++++ b/node_modules/@bsv/sdk/src/auth/transports/SimplifiedFetchTransport.ts
+@@ -13,7 +13,7 @@ const defaultFetch: typeof fetch =
+  * This class integrates with fetch to send and receive authenticated messages between peers.
+  */
+ export class SimplifiedFetchTransport implements Transport {
+-  private onDataCallback?: (message: AuthMessage) => void
++  private onDataCallback?: (message: AuthMessage) => Promise<void>
+   fetchClient: typeof fetch
+   baseUrl: string
+ 
+@@ -80,7 +80,7 @@ export class SimplifiedFetchTransport implements Transport {
+ 
+             if (this.onDataCallback != null) {
+               const responseMessage = await response.json()
+-              this.onDataCallback(responseMessage as AuthMessage)
++              await this.onDataCallback(responseMessage as AuthMessage)
+             }
+ 
+             if (message.messageType === 'initialRequest') {
+@@ -229,7 +229,7 @@ export class SimplifiedFetchTransport implements Transport {
+       }
+ 
+       // Handle the response if data is received and callback is set
+-      this.onDataCallback(responseMessage)
++      await this.onDataCallback(responseMessage)
+     }
+   }
+ 
+@@ -241,11 +241,8 @@ export class SimplifiedFetchTransport implements Transport {
+    * @returns A promise that resolves once the callback is set.
+    */
+   async onData(callback: (message: AuthMessage) => Promise<void>): Promise<void> {
+-    this.onDataCallback = (m) => {
+-      void callback(m).catch(() => {
+-        // Errors from handleIncomingMessage on the client side are not
+-        // actionable here — prevent unhandled promise rejections.
+-      })
++    this.onDataCallback = async (m) => {
++      await callback(m)
+     }
+   }
+ 
