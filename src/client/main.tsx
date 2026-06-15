@@ -520,9 +520,11 @@ async function responseToPageImage (res: Response, fallbackMessage: string, expe
   }
   const contentType = res.headers.get('content-type') ?? ''
   if (expectJson || contentType.includes('application/json')) {
-    const json = await res.json()
-    if (json.mimeType === 'image/png' && typeof json.dataBase64 === 'string') {
-      return { src: `data:${json.mimeType};base64,${json.dataBase64}`, revokeOnEvict: false }
+    const json = await res.json() as Record<string, unknown>
+    const mimeType = typeof json.mimeType === 'string' ? json.mimeType : ''
+    const dataBase64 = typeof json.dataBase64 === 'string' ? json.dataBase64 : ''
+    if (mimeType === 'image/png' && dataBase64 !== '') {
+      return { src: `data:${mimeType};base64,${dataBase64}`, revokeOnEvict: false }
     }
     if (typeof json.imageUrl === 'string') {
       postTelemetry('reader.page_image_url_fetch_started', 'info', {
