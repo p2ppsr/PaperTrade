@@ -1,5 +1,5 @@
 diff --git a/node_modules/@bsv/sdk/dist/cjs/src/auth/Peer.js b/node_modules/@bsv/sdk/dist/cjs/src/auth/Peer.js
-index 9a0265b..a2efa68 100644
+index 9a0265b..2a4f93f 100644
 --- a/node_modules/@bsv/sdk/dist/cjs/src/auth/Peer.js
 +++ b/node_modules/@bsv/sdk/dist/cjs/src/auth/Peer.js
 @@ -298,8 +298,9 @@ class Peer {
@@ -13,6 +13,66 @@ index 9a0265b..a2efa68 100644
      }
      /**
       * Waits for the initial response from the peer after sending an initial handshake request message.
+@@ -663,15 +664,16 @@ class Peer {
+             throw new Error(`Unable to verify nonce for general message from: ${message.identityKey}`);
+         }
+         const peerSession = await this.sessionManager.getSession(message.yourNonce);
+-        if (peerSession == null) {
++        const recoveredStatelessSession = peerSession == null;
++        if (peerSession == null && typeof message.identityKey !== 'string') {
+             throw new Error(`Session not found for nonce: ${message.yourNonce}`);
+         }
+-        const certificatesRequired = peerSession.certificatesRequired === true;
+-        const certificatesValidated = peerSession.certificatesValidated === true;
++        const certificatesRequired = peerSession?.certificatesRequired === true;
++        const certificatesValidated = peerSession?.certificatesValidated === true;
+         // If certificates are required but not yet validated, wait for them with a timeout
+         if (certificatesRequired && !certificatesValidated) {
+             const CERTIFICATE_WAIT_TIMEOUT_MS = 30000;
+-            const sessionNonce = peerSession.sessionNonce;
++            const sessionNonce = peerSession?.sessionNonce;
+             if (sessionNonce == null) {
+                 throw new Error('Session nonce is required for certificate validation');
+             }
+@@ -681,7 +683,7 @@ class Peer {
+                     const promise = this.certificateValidationPromises.get(sessionNonce);
+                     if (promise != null) {
+                         this.certificateValidationPromises.delete(sessionNonce);
+-                        reject(new Error(`Timeout waiting for certificate validation from peer ${peerSession.peerIdentityKey ?? 'unknown'}`));
++                        reject(new Error(`Timeout waiting for certificate validation from peer ${peerSession?.peerIdentityKey ?? 'unknown'}`));
+                     }
+                 }, CERTIFICATE_WAIT_TIMEOUT_MS);
+                 // Ensure the timer doesn't prevent process exit during tests
+@@ -701,19 +703,23 @@ class Peer {
+                 });
+             });
+         }
++        const sessionNonceForSignature = peerSession?.sessionNonce ?? message.yourNonce;
++        const counterpartyForSignature = peerSession?.peerIdentityKey ?? message.identityKey;
+         const { valid } = await this.wallet.verifySignature({
+             data: message.payload,
+             signature: message.signature,
+             protocolID: [2, 'auth message signature'],
+-            keyID: `${message.nonce ?? ''} ${peerSession.sessionNonce ?? ''}`,
+-            counterparty: peerSession.peerIdentityKey
++            keyID: `${message.nonce ?? ''} ${sessionNonceForSignature}`,
++            counterparty: counterpartyForSignature
+         }, this.originator);
+         if (!valid) {
+-            throw new Error(`Invalid signature in generalMessage from ${peerSession.peerIdentityKey}`);
++            throw new Error(`Invalid signature in generalMessage from ${counterpartyForSignature}`);
++        }
++        if (!recoveredStatelessSession && peerSession != null) {
++            // Mark last usage
++            peerSession.lastUpdate = Date.now();
++            await this.sessionManager.updateSession(peerSession);
+         }
+-        // Mark last usage
+-        peerSession.lastUpdate = Date.now();
+-        await this.sessionManager.updateSession(peerSession);
+         // Update lastInteractedWithPeer
+         this.lastInteractedWithPeer = message.identityKey;
+         // Dispatch callbacks
 diff --git a/node_modules/@bsv/sdk/dist/cjs/src/auth/transports/SimplifiedFetchTransport.js b/node_modules/@bsv/sdk/dist/cjs/src/auth/transports/SimplifiedFetchTransport.js
 index 4d5f3e2..01920dc 100644
 --- a/node_modules/@bsv/sdk/dist/cjs/src/auth/transports/SimplifiedFetchTransport.js
@@ -50,7 +110,7 @@ index 4d5f3e2..01920dc 100644
      }
      createNetworkError(url, originalError) {
 diff --git a/node_modules/@bsv/sdk/dist/esm/src/auth/Peer.js b/node_modules/@bsv/sdk/dist/esm/src/auth/Peer.js
-index ed1545f..14ec263 100644
+index ed1545f..ef56746 100644
 --- a/node_modules/@bsv/sdk/dist/esm/src/auth/Peer.js
 +++ b/node_modules/@bsv/sdk/dist/esm/src/auth/Peer.js
 @@ -291,8 +291,9 @@ export class Peer {
@@ -64,6 +124,66 @@ index ed1545f..14ec263 100644
      }
      /**
       * Waits for the initial response from the peer after sending an initial handshake request message.
+@@ -656,15 +657,16 @@ export class Peer {
+             throw new Error(`Unable to verify nonce for general message from: ${message.identityKey}`);
+         }
+         const peerSession = await this.sessionManager.getSession(message.yourNonce);
+-        if (peerSession == null) {
++        const recoveredStatelessSession = peerSession == null;
++        if (peerSession == null && typeof message.identityKey !== 'string') {
+             throw new Error(`Session not found for nonce: ${message.yourNonce}`);
+         }
+-        const certificatesRequired = peerSession.certificatesRequired === true;
+-        const certificatesValidated = peerSession.certificatesValidated === true;
++        const certificatesRequired = peerSession?.certificatesRequired === true;
++        const certificatesValidated = peerSession?.certificatesValidated === true;
+         // If certificates are required but not yet validated, wait for them with a timeout
+         if (certificatesRequired && !certificatesValidated) {
+             const CERTIFICATE_WAIT_TIMEOUT_MS = 30000;
+-            const sessionNonce = peerSession.sessionNonce;
++            const sessionNonce = peerSession?.sessionNonce;
+             if (sessionNonce == null) {
+                 throw new Error('Session nonce is required for certificate validation');
+             }
+@@ -674,7 +676,7 @@ export class Peer {
+                     const promise = this.certificateValidationPromises.get(sessionNonce);
+                     if (promise != null) {
+                         this.certificateValidationPromises.delete(sessionNonce);
+-                        reject(new Error(`Timeout waiting for certificate validation from peer ${peerSession.peerIdentityKey ?? 'unknown'}`));
++                        reject(new Error(`Timeout waiting for certificate validation from peer ${peerSession?.peerIdentityKey ?? 'unknown'}`));
+                     }
+                 }, CERTIFICATE_WAIT_TIMEOUT_MS);
+                 // Ensure the timer doesn't prevent process exit during tests
+@@ -694,19 +696,23 @@ export class Peer {
+                 });
+             });
+         }
++        const sessionNonceForSignature = peerSession?.sessionNonce ?? message.yourNonce;
++        const counterpartyForSignature = peerSession?.peerIdentityKey ?? message.identityKey;
+         const { valid } = await this.wallet.verifySignature({
+             data: message.payload,
+             signature: message.signature,
+             protocolID: [2, 'auth message signature'],
+-            keyID: `${message.nonce ?? ''} ${peerSession.sessionNonce ?? ''}`,
+-            counterparty: peerSession.peerIdentityKey
++            keyID: `${message.nonce ?? ''} ${sessionNonceForSignature}`,
++            counterparty: counterpartyForSignature
+         }, this.originator);
+         if (!valid) {
+-            throw new Error(`Invalid signature in generalMessage from ${peerSession.peerIdentityKey}`);
++            throw new Error(`Invalid signature in generalMessage from ${counterpartyForSignature}`);
++        }
++        if (!recoveredStatelessSession && peerSession != null) {
++            // Mark last usage
++            peerSession.lastUpdate = Date.now();
++            await this.sessionManager.updateSession(peerSession);
+         }
+-        // Mark last usage
+-        peerSession.lastUpdate = Date.now();
+-        await this.sessionManager.updateSession(peerSession);
+         // Update lastInteractedWithPeer
+         this.lastInteractedWithPeer = message.identityKey;
+         // Dispatch callbacks
 diff --git a/node_modules/@bsv/sdk/dist/esm/src/auth/transports/SimplifiedFetchTransport.js b/node_modules/@bsv/sdk/dist/esm/src/auth/transports/SimplifiedFetchTransport.js
 index 314b7d0..d0603ef 100644
 --- a/node_modules/@bsv/sdk/dist/esm/src/auth/transports/SimplifiedFetchTransport.js
@@ -101,7 +221,7 @@ index 314b7d0..d0603ef 100644
      }
      createNetworkError(url, originalError) {
 diff --git a/node_modules/@bsv/sdk/src/auth/Peer.ts b/node_modules/@bsv/sdk/src/auth/Peer.ts
-index c2499ab..d61552a 100644
+index c2499ab..9be1b3b 100644
 --- a/node_modules/@bsv/sdk/src/auth/Peer.ts
 +++ b/node_modules/@bsv/sdk/src/auth/Peer.ts
 @@ -394,8 +394,9 @@ export class Peer {
@@ -115,6 +235,73 @@ index c2499ab..d61552a 100644
    }
  
    /**
+@@ -889,17 +890,18 @@ export class Peer {
+     }
+ 
+     const peerSession = await this.sessionManager.getSession(message.yourNonce as string)
+-    if (peerSession == null) {
++    const recoveredStatelessSession = peerSession == null
++    if (peerSession == null && typeof message.identityKey !== 'string') {
+       throw new Error(`Session not found for nonce: ${message.yourNonce as string}`)
+     }
+ 
+-    const certificatesRequired = peerSession.certificatesRequired === true
+-    const certificatesValidated = peerSession.certificatesValidated === true
++    const certificatesRequired = peerSession?.certificatesRequired === true
++    const certificatesValidated = peerSession?.certificatesValidated === true
+ 
+     // If certificates are required but not yet validated, wait for them with a timeout
+     if (certificatesRequired && !certificatesValidated) {
+       const CERTIFICATE_WAIT_TIMEOUT_MS = 30000
+-      const sessionNonce = peerSession.sessionNonce
++      const sessionNonce = peerSession?.sessionNonce
+ 
+       if (sessionNonce == null) {
+         throw new Error('Session nonce is required for certificate validation')
+@@ -912,7 +914,7 @@ export class Peer {
+           if (promise != null) {
+             this.certificateValidationPromises.delete(sessionNonce)
+             reject(new Error(
+-              `Timeout waiting for certificate validation from peer ${peerSession.peerIdentityKey ?? 'unknown'
++              `Timeout waiting for certificate validation from peer ${peerSession?.peerIdentityKey ?? 'unknown'
+               }`
+             ))
+           }
+@@ -936,23 +938,28 @@ export class Peer {
+       })
+     }
+ 
++    const sessionNonceForSignature = peerSession?.sessionNonce ?? message.yourNonce as string
++    const counterpartyForSignature = peerSession?.peerIdentityKey ?? message.identityKey
++
+     const { valid } = await this.wallet.verifySignature({
+       data: message.payload,
+       signature: message.signature as number[],
+       protocolID: [2, 'auth message signature'],
+-      keyID: `${message.nonce ?? ''} ${peerSession.sessionNonce ?? ''}`,
+-      counterparty: peerSession.peerIdentityKey
++      keyID: `${message.nonce ?? ''} ${sessionNonceForSignature}`,
++      counterparty: counterpartyForSignature
+     }, this.originator)
+ 
+     if (!valid) {
+       throw new Error(
+-        `Invalid signature in generalMessage from ${peerSession.peerIdentityKey as string}`
++        `Invalid signature in generalMessage from ${counterpartyForSignature as string}`
+       )
+     }
+ 
+-    // Mark last usage
+-    peerSession.lastUpdate = Date.now()
+-    await this.sessionManager.updateSession(peerSession)
++    if (!recoveredStatelessSession && peerSession != null) {
++      // Mark last usage
++      peerSession.lastUpdate = Date.now()
++      await this.sessionManager.updateSession(peerSession)
++    }
+ 
+     // Update lastInteractedWithPeer
+     this.lastInteractedWithPeer = message.identityKey
 diff --git a/node_modules/@bsv/sdk/src/auth/transports/SimplifiedFetchTransport.ts b/node_modules/@bsv/sdk/src/auth/transports/SimplifiedFetchTransport.ts
 index 40b2f42..3648f18 100644
 --- a/node_modules/@bsv/sdk/src/auth/transports/SimplifiedFetchTransport.ts
