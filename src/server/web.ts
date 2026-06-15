@@ -186,6 +186,15 @@ function metanetManifest (serverPublicKey?: string): Record<string, unknown> {
       description: 'Read, publish, and receive PaperTrade payouts.',
       protocolPermissions: [
         {
+          protocolID: [2, 'server hmac'],
+          counterparty: 'self',
+          description: 'Authenticate PaperTrade server challenges.'
+        },
+        {
+          protocolID: [1, 'identity key retrieval'],
+          description: 'Use your identity key for BRC100 login.'
+        },
+        {
           protocolID: [2, 'auth message signature'],
           counterparty: 'self',
           description: 'Sign in to PaperTrade.'

@@ -12,6 +12,13 @@ describe('PaperTrade web manifest', () => {
     expect(manifest.metanet.schemaVersion).toBe(1)
     expect(manifest.metanet.serverIdentityKey).toBe(SERVER_KEY)
     expect(manifest.metanet.groupPermissions.protocolPermissions.length).toBeGreaterThan(0)
+    expect(manifest.metanet.groupPermissions.protocolPermissions).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ protocolID: [2, 'server hmac'], counterparty: 'self' }),
+        expect.objectContaining({ protocolID: [1, 'identity key retrieval'] }),
+        expect.objectContaining({ protocolID: [2, 'auth message signature'], counterparty: 'self' })
+      ])
+    )
     expect(manifest.metanet.groupPermissions.certificateAccess).toEqual([])
     expect(manifest.metanet.groupPermissions.certificateFieldAccess).toBeUndefined()
     expect(manifest.metanet.counterpartyPermissions.protocols).toEqual(
