@@ -16,7 +16,7 @@ describe('PaperTrade web manifest', () => {
       expect.arrayContaining([
         expect.objectContaining({ protocolID: [2, 'server hmac'], counterparty: 'self' }),
         expect.objectContaining({ protocolID: [1, 'identity key retrieval'] }),
-        expect.objectContaining({ protocolID: [2, 'auth message signature'], counterparty: 'self' })
+        expect.objectContaining({ protocolID: [2, 'auth message signature'], counterparty: SERVER_KEY })
       ])
     )
     expect(manifest.metanet.groupPermissions.certificateAccess).toEqual([])

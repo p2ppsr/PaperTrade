@@ -196,8 +196,8 @@ function metanetManifest (serverPublicKey?: string): Record<string, unknown> {
         },
         {
           protocolID: [2, 'auth message signature'],
-          counterparty: 'self',
-          description: 'Sign in to PaperTrade.'
+          counterparty: serverPublicKey ?? 'self',
+          description: 'Sign in to PaperTrade and verify server responses.'
         },
         {
           protocolID: [2, '3241645161d8'],
