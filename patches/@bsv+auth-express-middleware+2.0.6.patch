@@ -1,0 +1,94 @@
+diff --git a/node_modules/@bsv/auth-express-middleware/dist/cjs/src/index.js b/node_modules/@bsv/auth-express-middleware/dist/cjs/src/index.js
+index 0a3dd3b..a41608d 100644
+--- a/node_modules/@bsv/auth-express-middleware/dist/cjs/src/index.js
++++ b/node_modules/@bsv/auth-express-middleware/dist/cjs/src/index.js
+@@ -424,7 +424,7 @@ class ExpressTransport {
+                 const requestId = sdk_1.Utils.toBase64(new sdk_1.Utils.Reader(payload).read(32));
+                 if (requestId === req.headers['x-bsv-auth-request-id']) {
+                     (_a = this.peer) === null || _a === void 0 ? void 0 : _a.stopListeningForGeneralMessages(listenerId);
+-                    this.setupAuthenticatedResponse(req, res, next, senderPublicKey, requestId);
++                    this.setupAuthenticatedResponse(req, res, next, senderPublicKey, requestId, message.yourNonce);
+                 }
+             }
+             catch (error) {
+@@ -451,7 +451,7 @@ class ExpressTransport {
+     /**
+      * Sets up the intercepted response for an authenticated general message.
+      */
+-    setupAuthenticatedResponse(req, res, next, senderPublicKey, requestId) {
++    setupAuthenticatedResponse(req, res, next, senderPublicKey, requestId, requestSessionNonce) {
+         this.log('debug', 'General message from the correct identity key', { requestId, senderPublicKey });
+         req.auth = { identityKey: senderPublicKey };
+         const wrapper = new ResponseWriterWrapper(res);
+@@ -470,7 +470,7 @@ class ExpressTransport {
+                     responseHeaders: wrapper.getHeaders(),
+                     responseBodyLength: wrapper.getBody().length
+                 });
+-                await ((_a = this.peer) === null || _a === void 0 ? void 0 : _a.toPeer(responsePayload, req.headers['x-bsv-auth-identity-key']));
++                await ((_a = this.peer) === null || _a === void 0 ? void 0 : _a.toPeer(responsePayload, requestSessionNonce ?? req.headers['x-bsv-auth-identity-key']));
+             }
+             catch (err) {
+                 delete this.openGeneralHandles[requestId];
+diff --git a/node_modules/@bsv/auth-express-middleware/dist/esm/src/index.js b/node_modules/@bsv/auth-express-middleware/dist/esm/src/index.js
+index 9d9afcd..3f8af7a 100644
+--- a/node_modules/@bsv/auth-express-middleware/dist/esm/src/index.js
++++ b/node_modules/@bsv/auth-express-middleware/dist/esm/src/index.js
+@@ -417,7 +417,7 @@ export class ExpressTransport {
+                 const requestId = Utils.toBase64(new Utils.Reader(payload).read(32));
+                 if (requestId === req.headers['x-bsv-auth-request-id']) {
+                     this.peer?.stopListeningForGeneralMessages(listenerId);
+-                    this.setupAuthenticatedResponse(req, res, next, senderPublicKey, requestId);
++                    this.setupAuthenticatedResponse(req, res, next, senderPublicKey, requestId, message.yourNonce);
+                 }
+             }
+             catch (error) {
+@@ -444,7 +444,7 @@ export class ExpressTransport {
+     /**
+      * Sets up the intercepted response for an authenticated general message.
+      */
+-    setupAuthenticatedResponse(req, res, next, senderPublicKey, requestId) {
++    setupAuthenticatedResponse(req, res, next, senderPublicKey, requestId, requestSessionNonce) {
+         this.log('debug', 'General message from the correct identity key', { requestId, senderPublicKey });
+         req.auth = { identityKey: senderPublicKey };
+         const wrapper = new ResponseWriterWrapper(res);
+@@ -462,7 +462,7 @@ export class ExpressTransport {
+                     responseHeaders: wrapper.getHeaders(),
+                     responseBodyLength: wrapper.getBody().length
+                 });
+-                await this.peer?.toPeer(responsePayload, req.headers['x-bsv-auth-identity-key']);
++                await this.peer?.toPeer(responsePayload, requestSessionNonce ?? req.headers['x-bsv-auth-identity-key']);
+             }
+             catch (err) {
+                 delete this.openGeneralHandles[requestId];
+diff --git a/node_modules/@bsv/auth-express-middleware/src/index.ts b/node_modules/@bsv/auth-express-middleware/src/index.ts
+index 9246179..c4e46d6 100644
+--- a/node_modules/@bsv/auth-express-middleware/src/index.ts
++++ b/node_modules/@bsv/auth-express-middleware/src/index.ts
+@@ -574,7 +574,7 @@ export class ExpressTransport implements Transport {
+         const requestId = Utils.toBase64(new Utils.Reader(payload).read(32))
+         if (requestId === req.headers['x-bsv-auth-request-id']) {
+           this.peer?.stopListeningForGeneralMessages(listenerId)
+-          this.setupAuthenticatedResponse(req, res, next, senderPublicKey, requestId)
++          this.setupAuthenticatedResponse(req, res, next, senderPublicKey, requestId, message.yourNonce)
+         }
+       } catch (error) {
+         this.log('error', 'Error in listenForGeneralMessages callback', { error })
+@@ -608,7 +608,8 @@ export class ExpressTransport implements Transport {
+     res: Response,
+     next: NextFunction,
+     senderPublicKey: string,
+-    requestId: string
++    requestId: string,
++    requestSessionNonce?: string
+   ): void {
+     this.log('debug', 'General message from the correct identity key', { requestId, senderPublicKey })
+     req.auth = { identityKey: senderPublicKey }
+@@ -636,7 +637,7 @@ export class ExpressTransport implements Transport {
+           responseHeaders: wrapper.getHeaders(),
+           responseBodyLength: wrapper.getBody().length
+         })
+-        await this.peer?.toPeer(responsePayload, req.headers['x-bsv-auth-identity-key'] as string)
++        await this.peer?.toPeer(responsePayload, requestSessionNonce ?? req.headers['x-bsv-auth-identity-key'] as string)
+       } catch (err) {
+         delete this.openGeneralHandles[requestId]
+         this.log('error', 'Failed to build and send authenticated response', { error: err })
