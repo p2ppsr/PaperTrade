@@ -72,6 +72,12 @@ trap cleanup EXIT
 
 printf 'Starting PaperTrade Kaniko builder pod %s\n' "${pod}"
 "${kubectl_cmd}" run "${pod}" --restart=Never --image="${kaniko_image}" --command -- sleep 3600
+for _ in $(seq 1 30); do
+  if "${kubectl_cmd}" get "pod/${pod}" >/dev/null 2>&1; then
+    break
+  fi
+  sleep 1
+done
 "${kubectl_cmd}" wait --for=condition=Ready "pod/${pod}" --timeout=3m
 "${kubectl_cmd}" exec "${pod}" -- mkdir -p /kaniko/context
 
