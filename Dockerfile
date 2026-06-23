@@ -20,6 +20,7 @@ COPY patches ./patches
 RUN npm ci --omit=dev && npm cache clean --force
 COPY --from=build /app/build ./build
 COPY --from=build /app/dist ./dist
+COPY --from=build /app/src/server/public-domain ./dist/server/public-domain
 COPY migrations ./migrations
 COPY knexfile.cjs ./knexfile.cjs
 

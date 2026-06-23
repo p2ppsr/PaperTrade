@@ -14,7 +14,7 @@ import { db, getSettings, isAdmin, writeAudit } from './db.js'
 import { asPositiveInteger, splitCommission } from './money.js'
 import { createServerWallet, replacePersistedServerKey } from './wallet.js'
 import { getPublicationDir, processPublicationFile } from './content.js'
-import { STARTER_AUTHOR_NAME, STARTER_WORKS, type StarterWork, writeStarterPdf } from './starterWorks.js'
+import { STARTER_AUTHOR_NAME, STARTER_WORKS, starterCoverPath, starterWorkById, type StarterWork, writeStarterPdf } from './starterWorks.js'
 import { appManifest, metaForPath, renderHtmlShell, robotsTxt, sitemapXml, walletManifest, type PublicPublicationMeta } from './web.js'
 
 const serverDirname = path.dirname(fileURLToPath(import.meta.url))
@@ -620,19 +620,24 @@ function publicAuthorPayout (payout: any): AuthorPayoutPayload {
 }
 
 function publicPublicationFields (row: any): Record<string, unknown> {
+  const starter = starterWorkById(String(row.id))
   return {
     id: row.id,
     title: row.title,
-    description: row.description,
+    description: starter?.description ?? row.description,
     authorIdentityKey: row.author_identity_key,
-    authorName: row.display_name,
+    authorName: starter?.authorName ?? row.display_name,
     pageCount: Number(row.page_count),
     publishedAt: row.published_at,
-    coverUrl: `${ROUTING_PREFIX}/publications/${String(row.id)}/cover`
+    coverUrl: starter == null ? `${ROUTING_PREFIX}/publications/${String(row.id)}/cover` : `${ROUTING_PREFIX}/publications/${String(row.id)}/cover-art`,
+    isLibraryWork: starter != null,
+    sourceName: starter?.sourceName,
+    sourceUrl: starter?.sourceUrl
   }
 }
 
 function publicPublicationMetaFields (row: any): PublicPublicationMeta {
+  const starter = starterWorkById(String(row.id))
   const publishedAt = row.published_at == null
     ? null
     : row.published_at instanceof Date
@@ -641,11 +646,11 @@ function publicPublicationMetaFields (row: any): PublicPublicationMeta {
   return {
     id: String(row.id),
     title: String(row.title),
-    description: row.description,
-    authorName: row.display_name,
+    description: starter?.description ?? row.description,
+    authorName: starter?.authorName ?? row.display_name,
     pageCount: Number(row.page_count),
     publishedAt,
-    coverUrl: `${ROUTING_PREFIX}/publications/${String(row.id)}/cover`
+    coverUrl: starter == null ? `${ROUTING_PREFIX}/publications/${String(row.id)}/cover` : `${ROUTING_PREFIX}/publications/${String(row.id)}/cover-art`
   }
 }
 
@@ -671,6 +676,7 @@ async function listPublishedPublicationMeta (): Promise<PublicPublicationMeta[]>
 function appRoutePath (pathName: string): boolean {
   return pathName === '/' ||
     pathName === '/about' ||
+    pathName === '/help' ||
     pathName === '/author' ||
     pathName === '/admin' ||
     pathName === '/setup' ||
@@ -771,7 +777,7 @@ function isInternalTestPublication (row: Record<string, unknown>): boolean {
 
 async function starterNeedsProcessing (publicationId: string): Promise<boolean> {
   const publication = await db('publications').where({ id: publicationId }).first()
-  if (publication == null || Number(publication.page_count) < 5 || publication.cover_page_path == null) return true
+  if (publication == null || Number(publication.page_count) <= 5 || publication.cover_page_path == null) return true
 
   const page = await db('publication_pages').where({ publication_id: publicationId, page_number: 1 }).first()
   if (page == null) return true
@@ -790,7 +796,7 @@ async function seedStarterWork (work: StarterWork, starterAuthorIdentityKey: str
       id: work.id,
       author_identity_key: starterAuthorIdentityKey,
       title: work.title,
-      description: `${work.authorName}. ${work.description}`,
+      description: work.description,
       status: 'published',
       reviewed_by: starterAuthorIdentityKey,
       published_at: db.fn.now()
@@ -799,7 +805,7 @@ async function seedStarterWork (work: StarterWork, starterAuthorIdentityKey: str
     .merge({
       author_identity_key: starterAuthorIdentityKey,
       title: work.title,
-      description: `${work.authorName}. ${work.description}`,
+      description: work.description,
       status: 'published',
       reviewed_by: starterAuthorIdentityKey,
       published_at: db.fn.now(),
@@ -1173,6 +1179,20 @@ async function createApp (): Promise<express.Express> {
         return
       }
       await sendPublicationPageImage(publication, 1, req, res)
+    } catch (err) {
+      next(err)
+    }
+  })
+
+  api.get('/publications/:id/cover-art', async (req, res, next) => {
+    try {
+      const publication = await db('publications').where({ id: req.params.id, status: 'published' }).first()
+      const starter = starterWorkById(req.params.id)
+      if (publication == null || starter == null) {
+        res.status(404).json({ status: 'error', message: 'Cover art not found' })
+        return
+      }
+      res.type('image/jpeg').sendFile(await starterCoverPath(starter))
     } catch (err) {
       next(err)
     }

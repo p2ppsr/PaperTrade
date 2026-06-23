@@ -3,7 +3,7 @@ import { createRoot } from 'react-dom/client'
 import { BrowserRouter, Link, Route, Routes, useLocation, useNavigate, useParams } from 'react-router-dom'
 import { AuthFetch, Utils, WalletClient } from '@bsv/sdk'
 import { IdentityCard } from '@bsv/identity-react'
-import { Activity, BookOpen, Check, ExternalLink, FileText, Github, Home, Image, Info, Library, MessageCircle, Monitor, Palette, RefreshCw, Search, Settings, Share2, Smartphone, Upload, User, X } from 'lucide-react'
+import { Activity, BookOpen, Check, ExternalLink, FileText, Github, HelpCircle, Home, Image, Info, Library, MessageCircle, Monitor, Palette, RefreshCw, Search, Settings, Share2, Smartphone, Upload, User, X } from 'lucide-react'
 import './styles.css'
 
 type WalletSubstrate = 'auto' | 'json-api' | 'secure-json-api' | 'react-native' | 'Cicada' | 'XDM' | 'window.CWI'
@@ -50,6 +50,9 @@ interface Publication {
   pageCount: number
   publishedAt?: string
   coverUrl?: string
+  isLibraryWork?: boolean
+  sourceName?: string
+  sourceUrl?: string
 }
 
 interface AuthorProfile {
@@ -845,12 +848,23 @@ function IdentityPill ({ identityKey, label }: { identityKey?: string | null, la
   )
 }
 
+function PublicationByline ({ publication }: { publication: Publication }): JSX.Element {
+  return (
+    <span className='publication-byline'>
+      <User size={16} />
+      <span>By {publication.authorName ?? 'PaperTrade author'}</span>
+      {publication.isLibraryWork === true && <em>Public-domain edition</em>}
+    </span>
+  )
+}
+
 function feedbackSurfaceForPath (pathname: string): string {
   if (pathname.startsWith('/publication/')) return 'publication'
   if (pathname.startsWith('/read/')) return 'reader'
   if (pathname.startsWith('/author')) return 'author'
   if (pathname.startsWith('/admin')) return 'admin'
   if (pathname.startsWith('/about')) return 'about'
+  if (pathname.startsWith('/help')) return 'help'
   return 'newsstand'
 }
 
@@ -1055,6 +1069,7 @@ function Shell ({ children, status }: { children: React.ReactNode, status: Statu
   const location = useLocation()
   const [feedbackOpen, setFeedbackOpen] = useState(false)
   const feedbackSurface = feedbackSurfaceForPath(location.pathname)
+  const showStatusLine = status == null || !status.setupComplete || status.identityKey != null || status.isAdmin
   useEffect(() => setFeedbackOpen(false), [location.pathname])
   return (
     <div className='app-shell' style={appearanceStyle(appearance)}>
@@ -1062,11 +1077,12 @@ function Shell ({ children, status }: { children: React.ReactNode, status: Statu
         <Link className='brand' to='/'>
           {appearance.logoUrl != null && appearance.logoUrl !== ''
             ? <img className='brand-logo' src={appearance.logoUrl} alt='' />
-            : <Library size={26} />}
+            : <BookOpen size={26} />}
           <span>{appearance.serverName}</span>
         </Link>
         <nav>
           <Link to='/'><Home size={18} /> {appearance.newsstandLabel}</Link>
+          <Link to='/help'><HelpCircle size={18} /> Help</Link>
           <Link to='/about'><Info size={18} /> About</Link>
           <Link to='/author'><User size={18} /> Author</Link>
           <Link to='/admin'><Settings size={18} /> Admin</Link>
@@ -1074,10 +1090,12 @@ function Shell ({ children, status }: { children: React.ReactNode, status: Statu
         <button className='nav-feedback' type='button' onClick={() => setFeedbackOpen(true)}>
           <MessageCircle size={18} /> Feedback
         </button>
-        <div className='status-line'>
-          <span>{status?.setupComplete === true ? 'Live server' : 'Setup required'}</span>
-          <span>{status?.isAdmin === true ? 'Admin' : status?.identityKey != null ? 'Reader' : 'Guest'}</span>
-        </div>
+        {showStatusLine && (
+          <div className='status-line'>
+            <span>{status?.setupComplete === true ? 'Live server' : 'Setup required'}</span>
+            <span>{status?.isAdmin === true ? 'Admin' : status?.identityKey != null ? 'Reader' : 'Guest'}</span>
+          </div>
+        )}
       </aside>
       <main>{children}</main>
       {feedbackOpen && <FeedbackModal surface={feedbackSurface} onClose={() => setFeedbackOpen(false)} />}
@@ -1142,7 +1160,7 @@ function Newsstand ({ status }: { status: Status | null }): JSX.Element {
               <h2>{pub.title}</h2>
               <p>{pub.description}</p>
               <footer>
-                <IdentityPill identityKey={pub.authorIdentityKey} label={pub.authorName} />
+                <PublicationByline publication={pub} />
                 <span>{pub.pageCount} pages</span>
               </footer>
               <Link className='button' to={`/publication/${pub.id}`}>Open</Link>
@@ -1178,21 +1196,25 @@ function PublicationDetail ({ status }: { status: Status | null }): JSX.Element 
   }, [id])
   if (publication == null) return <section className='surface'><p>Loading publication...</p></section>
   return (
-    <section className='surface narrow'>
-      <header className='page-head'>
-        <div>
+    <section className='surface publication-detail'>
+      <header className='publication-hero'>
+        <img className='publication-hero-cover' src={publication.coverUrl ?? `${API}/publications/${publication.id}/cover`} alt='' />
+        <div className='publication-hero-copy'>
+          <PublicationByline publication={publication} />
           <h1>{publication.title}</h1>
           <p>{publication.description}</p>
+          <div className='publication-actions'>
+            <Link className='button' to={`/read/${publication.id}/1`}><BookOpen size={18} /> Read first page free</Link>
+            <ShareButton title={publication.title} text={publication.description ?? 'Read this PaperTrade publication.'} path={`/publication/${publication.id}`} />
+          </div>
         </div>
-        <ShareButton title={publication.title} text={publication.description ?? 'Read this PaperTrade publication.'} path={`/publication/${publication.id}`} />
       </header>
       <div className='facts'>
-        <IdentityPill identityKey={publication.authorIdentityKey} label={publication.authorName} />
         <span>{publication.pageCount} pages</span>
         <span>Page 1 free</span>
         <span>{status?.pricePerPageSats ?? 25} sats per paid page</span>
+        {publication.sourceUrl != null && <a href={publication.sourceUrl} target='_blank' rel='noreferrer'>Source text</a>}
       </div>
-      <Link className='button' to={`/read/${publication.id}/1`}><BookOpen size={18} /> Read first page free</Link>
     </section>
   )
 }
@@ -2182,6 +2204,56 @@ function About ({ status }: { status: Status | null }): JSX.Element {
   )
 }
 
+function Help ({ status }: { status: Status | null }): JSX.Element {
+  const appearance = appearanceFromStatus(status)
+  useEffect(() => {
+    setClientMeta(`Help | ${appearance.serverName}`, `Answers about reading, sats, wallets, public-domain works, and feedback on ${appearance.serverName}.`)
+  }, [appearance.serverName])
+  const price = status?.pricePerPageSats ?? 25
+  return (
+    <section className='surface help-surface'>
+      <header className='page-head help-head'>
+        <div>
+          <h1>Help</h1>
+          <p>Answers for readers using {appearance.serverName} on mobile or desktop.</p>
+        </div>
+        <button className='button secondary' type='button' onClick={() => window.scrollTo({ top: document.body.scrollHeight, behavior: 'smooth' })}>
+          <MessageCircle size={18} /> Feedback
+        </button>
+      </header>
+
+      <div className='faq-list'>
+        <section className='faq-item'>
+          <h2>What are sats?</h2>
+          <p>Sats are satoshis, the smallest unit of Bitcoin. PaperTrade prices paid pages in sats so a reader can unlock one page at a time instead of buying a whole file up front.</p>
+        </section>
+        <section className='faq-item'>
+          <h2>What does "page 1 free" mean?</h2>
+          <p>The first rendered page can be opened without a payment. Page 2 and later pages may ask a compatible wallet to approve a small per-page payment, currently {price} sats per paid page on this server.</p>
+        </section>
+        <section className='faq-item'>
+          <h2>Why do I need a wallet?</h2>
+          <p>A wallet handles identity, authentication, and payments. PaperTrade does not take custody of your wallet. On mobile, opening PaperTrade in a compatible wallet browser usually gives the smoothest reading flow.</p>
+        </section>
+        <section className='faq-item'>
+          <h2>Are the library books real public-domain works?</h2>
+          <p>Yes. The default library works use public-domain Project Gutenberg text and cover art from the bundled public-domain catalog. Publication pages link to the source record when one is available.</p>
+        </section>
+        <section className='faq-item'>
+          <h2>Why do I see author names instead of wallet identities?</h2>
+          <p>Reader pages show the human author name first. Wallet identity cards are still used in author and admin workflows where account ownership matters.</p>
+        </section>
+        <section className='faq-item'>
+          <h2>How do I leave feedback?</h2>
+          <p>Use the Feedback button in the header, the form on the newsstand, or the form below. The diagnostic ID helps connect feedback to the session without requiring a login.</p>
+        </section>
+      </div>
+
+      <FeedbackPanel surface='help' />
+    </section>
+  )
+}
+
 function AppRoutes ({ status, refresh }: { status: Status | null, refresh: () => Promise<void> }): JSX.Element {
   const location = useLocation()
   const needsSetup = useMemo(() => status != null && !status.setupComplete, [status])
@@ -2200,6 +2272,7 @@ function AppRoutes ({ status, refresh }: { status: Status | null, refresh: () =>
         <Route path='/admin' element={<Admin status={status} refreshStatus={refresh} />} />
         <Route path='/admin/read/:id/:pageNumber' element={<AuthorPreview />} />
         <Route path='/setup' element={<Setup status={status} refresh={refresh} />} />
+        <Route path='/help' element={<Help status={status} />} />
         <Route path='/about' element={<About status={status} />} />
       </Routes>
     </Shell>

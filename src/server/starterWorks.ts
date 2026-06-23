@@ -1,15 +1,21 @@
 import fs from 'fs/promises'
 import path from 'path'
+import { fileURLToPath } from 'url'
 
 export const STARTER_AUTHOR_IDENTITY_KEY = 'papertrade-starter-library'
-export const STARTER_AUTHOR_NAME = 'PaperTrade Starter Library'
+export const STARTER_AUTHOR_NAME = 'Public Domain Library'
+export const STARTER_SOURCE_NAME = 'Project Gutenberg public-domain text'
 
 export interface StarterWork {
   id: string
   title: string
   authorName: string
   description: string
-  pages: string[]
+  textFile: string
+  coverFile: string
+  sourceUrl: string
+  sourceName: string
+  gutenbergId: string
 }
 
 export const STARTER_WORKS: StarterWork[] = [
@@ -18,135 +24,161 @@ export const STARTER_WORKS: StarterWork[] = [
     title: 'Pride and Prejudice',
     authorName: 'Jane Austen',
     description: 'A public-domain classic of manners, family pressure, first impressions, and slow-earned affection.',
-    pages: starterPages('Pride and Prejudice', 'Jane Austen', [
-      'This starter edition introduces the world of the Bennet family, where inheritance rules and social expectations turn marriage into a serious family strategy.',
-      'Elizabeth Bennet stands apart because she notices absurdity quickly and refuses to trade her judgment for comfort.',
-      'Mr. Darcy begins as a figure of pride and distance, but the story steadily asks whether first impressions are always fair.',
-      'The pleasure of the novel is not only romance. It is conversation, wit, embarrassment, correction, and the gradual discovery of character.',
-      'This public-domain work is a useful seed title for PaperTrade because it demonstrates serialized reading, literary browsing, and page-by-page discovery.'
-    ])
+    textFile: 'pride-and-prejudice.txt',
+    coverFile: 'pride-and-prejudice.jpg',
+    sourceUrl: 'https://www.gutenberg.org/ebooks/1342',
+    sourceName: STARTER_SOURCE_NAME,
+    gutenbergId: '1342'
   },
   {
     id: '5d0c3c44-0b3f-4b1a-94b4-000000000002',
     title: 'The Adventures of Sherlock Holmes',
     authorName: 'Arthur Conan Doyle',
     description: 'Public-domain detective stories built around observation, inference, and memorable London cases.',
-    pages: starterPages('The Adventures of Sherlock Holmes', 'Arthur Conan Doyle', [
-      'Sherlock Holmes stories make ideal short-form newsstand reading: each case invites a reader to notice details before the detective explains them.',
-      'Dr. Watson gives the stories their warmth. He is impressed, puzzled, loyal, and often just skeptical enough to keep the mystery human.',
-      'The appeal is procedural: a visitor arrives, facts are gathered, false assumptions fall away, and a hidden pattern becomes visible.',
-      'Holmes is not magic. The drama comes from disciplined attention applied to things other people overlook.',
-      'This starter edition is included as royalty-free public-domain material for server operators who want a ready-made catalog on first launch.'
-    ])
+    textFile: 'sherlock-holmes.txt',
+    coverFile: 'sherlock-holmes.jpg',
+    sourceUrl: 'https://www.gutenberg.org/ebooks/1661',
+    sourceName: STARTER_SOURCE_NAME,
+    gutenbergId: '1661'
   },
   {
     id: '5d0c3c44-0b3f-4b1a-94b4-000000000003',
     title: 'Alice in Wonderland',
     authorName: 'Lewis Carroll',
     description: 'A public-domain journey through wordplay, strange rules, impossible etiquette, and dream logic.',
-    pages: starterPages('Alice in Wonderland', 'Lewis Carroll', [
-      'Alice follows curiosity into a place where language slips, size changes, and ordinary rules stop behaving.',
-      'The story works because it treats nonsense with formal seriousness. Every strange character seems to know the rules except Alice.',
-      'For readers, the pleasure is motion: falling, growing, shrinking, arguing, reciting, questioning, and waking into another scene.',
-      'The book remains useful for a digital newsstand because individual pages can feel like small complete surprises.',
-      'This starter edition provides a royalty-free public-domain sample for a playful first browsing experience.'
-    ])
+    textFile: 'alice-in-wonderland.txt',
+    coverFile: 'alice-in-wonderland.jpg',
+    sourceUrl: 'https://www.gutenberg.org/ebooks/11',
+    sourceName: STARTER_SOURCE_NAME,
+    gutenbergId: '11'
   },
   {
     id: '5d0c3c44-0b3f-4b1a-94b4-000000000004',
     title: 'The Time Machine',
     authorName: 'H. G. Wells',
     description: 'A public-domain science fiction landmark about invention, class, deep time, and fragile civilization.',
-    pages: starterPages('The Time Machine', 'H. G. Wells', [
-      'The Time Traveller begins with a device and a claim: time can be crossed as surely as distance.',
-      'Wells turns that premise into a social warning. The future is not merely advanced; it is divided, altered, and unsettling.',
-      'The story moves from drawing-room argument to far-future landscape, keeping the frame of scientific curiosity intact.',
-      'Its power comes from scale. A single experiment becomes a tour through consequences that stretch beyond one human life.',
-      'This public-domain seed work gives PaperTrade a concise speculative title for readers who want ideas with momentum.'
-    ])
+    textFile: 'time-machine.txt',
+    coverFile: 'time-machine.jpg',
+    sourceUrl: 'https://www.gutenberg.org/ebooks/35',
+    sourceName: STARTER_SOURCE_NAME,
+    gutenbergId: '35'
   },
   {
     id: '5d0c3c44-0b3f-4b1a-94b4-000000000005',
     title: 'The Wonderful Wizard of Oz',
     authorName: 'L. Frank Baum',
     description: 'A public-domain American fantasy about travel, companionship, courage, and home.',
-    pages: starterPages('The Wonderful Wizard of Oz', 'L. Frank Baum', [
-      'Dorothy is carried from ordinary Kansas into a bright country where the road itself becomes a structure for adventure.',
-      'The companions each believe they lack something essential, and each journey tests that belief in practical ways.',
-      'Baum keeps the story direct and visual, which makes it a strong fit for page previews and mobile browsing.',
-      'The book is generous with scenes: roads, fields, cities, disguises, dangers, and sudden turns of fortune.',
-      'This royalty-free starter edition adds a family-friendly public-domain title to the default PaperTrade shelf.'
-    ])
+    textFile: 'wizard-of-oz.txt',
+    coverFile: 'wizard-of-oz.jpg',
+    sourceUrl: 'https://www.gutenberg.org/ebooks/55',
+    sourceName: STARTER_SOURCE_NAME,
+    gutenbergId: '55'
   },
   {
     id: '5d0c3c44-0b3f-4b1a-94b4-000000000006',
     title: 'The Secret Garden',
     authorName: 'Frances Hodgson Burnett',
     description: 'A public-domain story of loneliness, recovery, friendship, and the hidden life of a garden.',
-    pages: starterPages('The Secret Garden', 'Frances Hodgson Burnett', [
-      'The story begins with a child who has been neglected into sharpness and sent to a house full of silence.',
-      'Discovery changes the rhythm: a key, a door, a patch of earth, and the possibility that care can revive what looked lost.',
-      'The garden is both place and process. It asks for attention, patience, labor, and trust.',
-      'Friendship enters gradually, and the book treats health as something connected to air, movement, hope, and belonging.',
-      'This public-domain seed title gives PaperTrade a quiet, restorative work for readers browsing beyond adventure and mystery.'
-    ])
+    textFile: 'secret-garden.txt',
+    coverFile: 'secret-garden.jpg',
+    sourceUrl: 'https://www.gutenberg.org/ebooks/113',
+    sourceName: STARTER_SOURCE_NAME,
+    gutenbergId: '113'
   },
   {
     id: '5d0c3c44-0b3f-4b1a-94b4-000000000007',
     title: 'Moby-Dick',
     authorName: 'Herman Melville',
     description: 'A public-domain sea novel of obsession, labor, myth, danger, and encyclopedic attention.',
-    pages: starterPages('Moby-Dick', 'Herman Melville', [
-      'Melville opens a vast book through a restless narrator looking for the sea and for a change in the weather of his own mind.',
-      'The voyage becomes more than travel. It is work, ritual, hierarchy, friendship, danger, and the pressure of Captain Ahab.',
-      'The novel mixes story with catalog, philosophy, comedy, technical detail, and sudden lyric force.',
-      'Its scale makes it useful as a seeded work: readers can sample a page, then decide whether to keep moving through the voyage.',
-      'This starter edition places a major public-domain American classic on every new PaperTrade newsstand.'
-    ])
+    textFile: 'moby-dick.txt',
+    coverFile: 'moby-dick.jpg',
+    sourceUrl: 'https://www.gutenberg.org/ebooks/2701',
+    sourceName: STARTER_SOURCE_NAME,
+    gutenbergId: '2701'
   },
   {
     id: '5d0c3c44-0b3f-4b1a-94b4-000000000008',
     title: 'Narrative of the Life of Frederick Douglass',
     authorName: 'Frederick Douglass',
     description: 'A public-domain autobiographical work about slavery, literacy, escape, and human dignity.',
-    pages: starterPages('Narrative of the Life of Frederick Douglass', 'Frederick Douglass', [
-      'Douglass gives direct testimony about slavery and insists on the moral clarity of lived experience.',
-      'The book is brief, forceful, and carefully structured around memory, violence, learning, resistance, and escape.',
-      'Literacy is central. Reading and writing become tools of self-possession in a system built to deny personhood.',
-      'The work remains essential because it joins personal narrative to political argument without losing either force.',
-      'This public-domain seed title adds historical weight and civic seriousness to the default PaperTrade collection.'
-    ])
+    textFile: 'frederick-douglass.txt',
+    coverFile: 'frederick-douglass.jpg',
+    sourceUrl: 'https://www.gutenberg.org/ebooks/23',
+    sourceName: STARTER_SOURCE_NAME,
+    gutenbergId: '23'
   },
   {
     id: '5d0c3c44-0b3f-4b1a-94b4-000000000009',
     title: 'The Souls of Black Folk',
     authorName: 'W. E. B. Du Bois',
     description: 'A public-domain collection of essays on race, education, history, music, and American democracy.',
-    pages: starterPages('The Souls of Black Folk', 'W. E. B. Du Bois', [
-      'Du Bois writes with scholarship, memory, argument, and music in close relation.',
-      'The essays examine the color line as a defining problem of American public life.',
-      'Education, political rights, labor, grief, and culture are treated as connected questions rather than separate topics.',
-      'The work rewards slow reading because its chapters move between analysis, history, personal encounter, and spirituals.',
-      'This public-domain seed work gives PaperTrade a serious essay collection suitable for thoughtful page-by-page reading.'
-    ])
+    textFile: 'souls-of-black-folk.txt',
+    coverFile: 'souls-of-black-folk.jpg',
+    sourceUrl: 'https://www.gutenberg.org/ebooks/408',
+    sourceName: STARTER_SOURCE_NAME,
+    gutenbergId: '408'
   },
   {
     id: '5d0c3c44-0b3f-4b1a-94b4-000000000010',
     title: 'Grimms Fairy Tales',
     authorName: 'Jacob and Wilhelm Grimm',
     description: 'Public-domain folk tales full of tests, transformations, bargains, warnings, and wonder.',
-    pages: starterPages('Grimms Fairy Tales', 'Jacob and Wilhelm Grimm', [
-      'The Grimm tales are compact, memorable, and built from direct narrative pressure: a problem appears, a test follows, and consequences arrive.',
-      'They are not only children stories. Their patterns preserve older fears about hunger, luck, promises, family, and danger.',
-      'A tale can turn quickly from ordinary work to enchantment, from kindness to reward, or from arrogance to punishment.',
-      'This format makes them natural for a per-page newsstand because each short section carries its own charge.',
-      'This royalty-free public-domain starter edition rounds out the default shelf with folk material familiar across generations.'
-    ])
+    textFile: 'grimms-fairy-tales.txt',
+    coverFile: 'grimms-fairy-tales.jpg',
+    sourceUrl: 'https://www.gutenberg.org/ebooks/2591',
+    sourceName: STARTER_SOURCE_NAME,
+    gutenbergId: '2591'
   }
 ]
 
-function starterPages (title: string, authorName: string, body: string[]): string[] {
-  return body.map((text, index) => `${title}\n${authorName}\n\nPage ${index + 1}\n\n${text}\n\nPaperTrade public-domain starter library.`)
+const assetRootCandidates = [
+  path.join(path.dirname(fileURLToPath(import.meta.url)), 'public-domain'),
+  path.join(process.cwd(), 'src', 'server', 'public-domain')
+]
+
+export function starterWorkById (publicationId: string): StarterWork | undefined {
+  return STARTER_WORKS.find(work => work.id === publicationId)
+}
+
+async function firstExistingPath (candidates: string[]): Promise<string> {
+  for (const candidate of candidates) {
+    try {
+      await fs.access(candidate)
+      return candidate
+    } catch {}
+  }
+  throw new Error(`Starter public-domain asset not found: ${candidates.join(', ')}`)
+}
+
+async function publicDomainAssetRoot (): Promise<string> {
+  return await firstExistingPath(assetRootCandidates)
+}
+
+export async function starterTextPath (work: StarterWork): Promise<string> {
+  const root = await publicDomainAssetRoot()
+  return path.join(root, 'texts', work.textFile)
+}
+
+export async function starterCoverPath (work: StarterWork): Promise<string> {
+  const root = await publicDomainAssetRoot()
+  return path.join(root, 'covers', work.coverFile)
+}
+
+function stripProjectGutenbergBoilerplate (source: string): string {
+  const normalized = source.replace(/^\uFEFF/, '').replace(/\r\n/g, '\n').replace(/\r/g, '\n')
+  const lines = normalized.split('\n')
+  const start = lines.findIndex(line => /\*\*\* START OF (?:THE|THIS) PROJECT GUTENBERG EBOOK/i.test(line))
+  const end = lines.findIndex(line => /\*\*\* END OF (?:THE|THIS) PROJECT GUTENBERG EBOOK/i.test(line))
+  const body = lines.slice(start >= 0 ? start + 1 : 0, end > start ? end : lines.length).join('\n')
+  return body
+    .replace(/\n{4,}/g, '\n\n\n')
+    .replace(/[ \t]+\n/g, '\n')
+    .trim()
+}
+
+export async function readStarterText (work: StarterWork): Promise<string> {
+  const text = await fs.readFile(await starterTextPath(work), 'utf8')
+  return stripProjectGutenbergBoilerplate(text)
 }
 
 function escapePdfText (value: string): string {
@@ -170,16 +202,61 @@ function wrapLine (line: string, width: number): string[] {
   return lines.length > 0 ? lines : ['']
 }
 
+function pdfSafeText (text: string): string {
+  const ascii = text
+    .replace(/[\u2018\u2019]/g, "'")
+    .replace(/[\u201C\u201D]/g, '"')
+    .replace(/[\u2013\u2014]/g, '--')
+    .replace(/\u2026/g, '...')
+    .normalize('NFKD')
+    .replace(/[\u0300-\u036f]/g, '')
+  return Array.from(ascii).filter(char => {
+    const code = char.charCodeAt(0)
+    return code === 9 || code === 10 || code === 13 || (code >= 32 && code <= 126)
+  }).join('')
+}
+
+function paginateText (work: StarterWork, text: string): string[] {
+  const sourcePage = [
+    work.title,
+    work.authorName,
+    '',
+    `Public-domain source: ${work.sourceName}`,
+    work.sourceUrl,
+    '',
+    'This PaperTrade edition uses the real public-domain text. It is lightly wrapped into pages so it can be read and purchased page by page.'
+  ].join('\n')
+
+  const pages = [sourcePage]
+  const current: string[] = []
+  const flush = (): void => {
+    while (current.length > 0 && current[current.length - 1] === '') current.pop()
+    if (current.length > 0) pages.push(current.splice(0, current.length).join('\n'))
+  }
+
+  for (const paragraph of pdfSafeText(text).split(/\n{2,}/)) {
+    const paragraphLines = paragraph.split('\n').flatMap(line => wrapLine(line, 86))
+    const block = paragraphLines.length > 0 ? paragraphLines : ['']
+    if (current.length + block.length + 1 > 48) flush()
+    current.push(...block, '')
+    while (current.length > 52) {
+      pages.push(current.splice(0, 48).join('\n'))
+    }
+  }
+  flush()
+  return pages
+}
+
 function pageStream (page: string): string {
-  const rawLines = page.split('\n').flatMap(line => wrapLine(line, 70))
-  const lines = rawLines.slice(0, 31)
+  const rawLines = page.split('\n').flatMap(line => wrapLine(line, 86))
+  const lines = rawLines.slice(0, 52)
   const commands = [
     'BT',
-    '/F1 17 Tf',
-    '72 730 Td'
+    '/F1 11.5 Tf',
+    '54 742 Td'
   ]
   lines.forEach((line, index) => {
-    if (index > 0) commands.push('0 -22 Td')
+    if (index > 0) commands.push('0 -13 Td')
     commands.push(`(${escapePdfText(line)}) Tj`)
   })
   commands.push('ET')
@@ -188,15 +265,16 @@ function pageStream (page: string): string {
 
 export async function writeStarterPdf (work: StarterWork, targetPath: string): Promise<void> {
   await fs.mkdir(path.dirname(targetPath), { recursive: true })
-  const maxObjectId = 3 + work.pages.length * 2
+  const pages = paginateText(work, await readStarterText(work))
+  const maxObjectId = 3 + pages.length * 2
   const objects = new Map<number, string>()
-  const pageObjectIds = work.pages.map((_page, index) => 4 + index * 2)
+  const pageObjectIds = pages.map((_page, index) => 4 + index * 2)
 
   objects.set(1, '<< /Type /Catalog /Pages 2 0 R >>')
-  objects.set(2, `<< /Type /Pages /Kids [${pageObjectIds.map(id => `${id} 0 R`).join(' ')}] /Count ${work.pages.length} >>`)
+  objects.set(2, `<< /Type /Pages /Kids [${pageObjectIds.map(id => `${id} 0 R`).join(' ')}] /Count ${pages.length} >>`)
   objects.set(3, '<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>')
 
-  work.pages.forEach((page, index) => {
+  pages.forEach((page, index) => {
     const pageObjectId = pageObjectIds[index]
     const contentObjectId = pageObjectId + 1
     const stream = pageStream(page)
@@ -204,7 +282,7 @@ export async function writeStarterPdf (work: StarterWork, targetPath: string): P
     objects.set(contentObjectId, `<< /Length ${Buffer.byteLength(stream)} >>\nstream\n${stream}\nendstream`)
   })
 
-  let pdf = '%PDF-1.4\n%PaperTrade\n'
+  let pdf = '%PDF-1.4\n%PaperTrade public-domain edition\n'
   const offsets = [0]
   for (let id = 1; id <= maxObjectId; id += 1) {
     offsets[id] = Buffer.byteLength(pdf)

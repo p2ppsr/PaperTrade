@@ -47,10 +47,14 @@ describe('PaperTrade web manifest', () => {
       metaDescription: 'PaperTrade is a BSV newsstand where readers preview page 1 free and pay per page for independent writing with a BRC100 wallet.'
     })
     const readerMeta = metaForPath('/read/example/2')
+    const helpMeta = metaForPath('/help')
 
     expect(manifest.description).toContain('free first-page previews')
+    expect((manifest.shortcuts as any[]).some(shortcut => shortcut.url === '/help')).toBe(true)
     expect(homeMeta.description).toContain('free first-page previews')
     expect(homeMeta.description).not.toContain('BRC100 wallet')
     expect(readerMeta.description).toBe('Read page 1 free, then continue page by page with a compatible wallet.')
+    expect(helpMeta.title).toBe('Help | PaperTrade')
+    expect(helpMeta.description).toContain('sats')
   })
 })

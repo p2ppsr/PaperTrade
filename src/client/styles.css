@@ -323,6 +323,29 @@ h1 {
   left: 10px;
   min-height: 30px;
   padding: 0 10px;
+  position: absolute;
+}
+
+.publication-byline {
+  align-items: center;
+  color: var(--pt-muted);
+  display: inline-flex;
+  flex-wrap: wrap;
+  font-size: 14px;
+  font-weight: 800;
+  gap: 7px;
+  line-height: 1.25;
+  min-width: 0;
+}
+
+.publication-byline em {
+  background: var(--pt-soft);
+  border: 1px solid color-mix(in srgb, var(--pt-primary) 34%, var(--pt-border) 66%);
+  border-radius: 999px;
+  color: var(--pt-primary);
+  font-size: 12px;
+  font-style: normal;
+  padding: 4px 8px;
 }
 
 .publication footer,
@@ -334,6 +357,62 @@ h1 {
   gap: 12px;
   justify-content: space-between;
   margin: 14px 0;
+}
+
+.publication-detail {
+  max-width: 1050px;
+}
+
+.publication-hero {
+  align-items: start;
+  display: grid;
+  gap: 24px;
+  grid-template-columns: minmax(180px, 260px) minmax(0, 1fr);
+  margin-bottom: 18px;
+}
+
+.publication-hero-cover {
+  aspect-ratio: 2 / 3;
+  background: var(--pt-soft);
+  border: 1px solid var(--pt-border);
+  border-radius: 8px;
+  box-shadow: 0 12px 28px rgba(31, 35, 31, 0.12);
+  display: block;
+  object-fit: cover;
+  width: 100%;
+}
+
+.publication-hero-copy {
+  display: grid;
+  gap: 16px;
+  min-width: 0;
+}
+
+.publication-hero h1 {
+  font-size: clamp(36px, 5vw, 64px);
+  letter-spacing: 0;
+  line-height: 0.96;
+  margin: 0;
+}
+
+.publication-hero p {
+  color: var(--pt-text);
+  font-size: 20px;
+  line-height: 1.42;
+  margin-bottom: 0;
+  max-width: 720px;
+}
+
+.publication-actions {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.facts a {
+  color: var(--pt-primary);
+  font-weight: 800;
 }
 
 .identity-card-wrap {
@@ -670,6 +749,43 @@ h1 {
 
 .about-panel svg {
   color: var(--pt-primary);
+}
+
+.help-surface {
+  max-width: 980px;
+}
+
+.help-head p {
+  color: var(--pt-muted);
+  font-size: 18px;
+  line-height: 1.45;
+}
+
+.faq-list {
+  display: grid;
+  gap: 12px;
+  margin-bottom: 18px;
+}
+
+.faq-item {
+  background: var(--pt-surface);
+  border: 1px solid var(--pt-border);
+  border-radius: 8px;
+  display: grid;
+  gap: 8px;
+  padding: 18px;
+}
+
+.faq-item h2 {
+  font-size: 20px;
+  line-height: 1.2;
+  margin: 0;
+}
+
+.faq-item p {
+  color: var(--pt-muted);
+  line-height: 1.5;
+  margin: 0;
 }
 
 .contract-grid {
@@ -1167,6 +1283,32 @@ h1 {
     display: grid;
     gap: 16px;
     margin-bottom: 18px;
+  }
+
+  .publication-hero {
+    gap: 18px;
+    grid-template-columns: 1fr;
+  }
+
+  .publication-hero-cover {
+    max-width: 210px;
+  }
+
+  .publication-hero h1 {
+    font-size: 34px;
+    line-height: 1.02;
+  }
+
+  .publication-hero p {
+    font-size: 17px;
+    line-height: 1.4;
+  }
+
+  .publication-actions,
+  .publication-actions .button,
+  .publication-actions .share-wrap,
+  .publication-actions .share-wrap .button {
+    width: 100%;
   }
 
   .newsstand-head p {

@@ -171,6 +171,13 @@ export function appManifest (serverPublicKey?: string, appearance?: AppearanceMe
         description: `Learn how ${app.serverName} works and deploy your own server.`,
         url: '/about',
         icons: [{ src: icon, sizes: 'any', type: icon.endsWith('.svg') ? 'image/svg+xml' : 'image/png' }]
+      },
+      {
+        name: `${app.serverName} help`,
+        short_name: 'Help',
+        description: 'Read answers about sats, wallets, public-domain works, and feedback.',
+        url: '/help',
+        icons: [{ src: icon, sizes: 'any', type: icon.endsWith('.svg') ? 'image/svg+xml' : 'image/png' }]
       }
     ],
     share_target: {
@@ -331,6 +338,24 @@ export function metaForPath (pathName: string, publication?: PublicPublicationMe
         url: absoluteUrl('/about'),
         offers: { '@type': 'Offer', price: '0', priceCurrency: 'USD' },
         codeRepository: 'https://github.com/p2ppsr/PaperTrade'
+      }
+    }
+  }
+
+  if (pathName === '/help') {
+    return {
+      title: `Help | ${app.serverName}`,
+      description: `Answers about reading, sats, wallets, public-domain works, and feedback on ${app.serverName}.`,
+      canonicalPath: '/help',
+      imagePath: app.ogImageUrl ?? '/og-image.svg',
+      siteName: app.serverName,
+      themeColor: app.theme.primary,
+      type: 'website',
+      structuredData: {
+        '@context': 'https://schema.org',
+        '@type': 'FAQPage',
+        name: `${app.serverName} help`,
+        url: absoluteUrl('/help')
       }
     }
   }
