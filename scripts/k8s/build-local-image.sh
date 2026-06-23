@@ -78,6 +78,7 @@ for _ in $(seq 1 30); do
   fi
   sleep 1
 done
+sleep "${KANIKO_POD_SETTLE_SECONDS:-5}"
 "${kubectl_cmd}" wait --for=condition=Ready "pod/${pod}" --timeout=3m
 "${kubectl_cmd}" exec "${pod}" -- mkdir -p /kaniko/context
 
