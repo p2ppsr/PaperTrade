@@ -14,6 +14,12 @@ export interface WalletBootstrap {
 
 const DATA_DIR = process.env.DATA_DIR ?? '/data/papertrade'
 const KEY_PATH = process.env.SERVER_PRIVATE_KEY_PATH ?? path.join(DATA_DIR, 'server-private-key')
+const WALLET_BOOTSTRAP_RETRY_COUNT = Number(process.env.WALLET_BOOTSTRAP_RETRY_COUNT ?? '8')
+const WALLET_BOOTSTRAP_RETRY_DELAY_MS = Number(process.env.WALLET_BOOTSTRAP_RETRY_DELAY_MS ?? '2500')
+
+async function sleep (ms: number): Promise<void> {
+  await new Promise(resolve => setTimeout(resolve, ms))
+}
 
 async function readPersistedKey (): Promise<string | null> {
   try {
@@ -58,11 +64,35 @@ export async function createServerWallet (): Promise<WalletBootstrap> {
   })
 
   const chain = (process.env.BSV_NETWORK ?? 'mainnet') === 'testnet' ? 'test' : 'main'
-  const wallet = await Setup.createWalletClientNoEnv({
-    rootKeyHex: privateKeyHex,
-    storageUrl: process.env.WALLET_STORAGE_URL ?? 'https://storage.babbage.systems',
-    chain
-  })
+  const storageUrl = process.env.WALLET_STORAGE_URL ?? 'https://storage.babbage.systems'
+  let wallet: any
+  let lastError: unknown
+  const attempts = Number.isFinite(WALLET_BOOTSTRAP_RETRY_COUNT) && WALLET_BOOTSTRAP_RETRY_COUNT > 0 ? WALLET_BOOTSTRAP_RETRY_COUNT : 8
+  const delayMs = Number.isFinite(WALLET_BOOTSTRAP_RETRY_DELAY_MS) && WALLET_BOOTSTRAP_RETRY_DELAY_MS > 0 ? WALLET_BOOTSTRAP_RETRY_DELAY_MS : 2500
+  for (let attempt = 1; attempt <= attempts; attempt += 1) {
+    try {
+      wallet = await Setup.createWalletClientNoEnv({
+        rootKeyHex: privateKeyHex,
+        storageUrl,
+        chain
+      })
+      break
+    } catch (err) {
+      lastError = err
+      if (attempt >= attempts) break
+      console.warn(JSON.stringify({
+        level: 'warn',
+        service: 'papertrade',
+        event: 'wallet_bootstrap_retry',
+        attempt,
+        attempts,
+        storageUrl,
+        message: err instanceof Error ? err.message : String(err)
+      }))
+      await sleep(delayMs * attempt)
+    }
+  }
+  if (wallet == null) throw lastError instanceof Error ? lastError : new Error(String(lastError ?? 'Wallet bootstrap failed'))
 
   return { wallet, privateKeyHex, publicKey, keyStatus }
 }
