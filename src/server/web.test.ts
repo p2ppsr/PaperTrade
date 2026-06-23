@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { appManifest, walletManifest } from './web.js'
+import { appManifest, metaForPath, walletManifest } from './web.js'
 
 const SERVER_KEY = '02'.padEnd(66, '1')
 
@@ -38,5 +38,19 @@ describe('PaperTrade web manifest', () => {
     expect(alias.metanet).toEqual(canonical.metanet)
     expect(alias.babbage).toEqual(canonical.babbage)
     expect(alias.originator).toBe('papertrade.metanet.app')
+  })
+
+  it('keeps reader-facing defaults focused on reading before wallet mechanics', () => {
+    const manifest = appManifest(SERVER_KEY) as any
+    const homeMeta = metaForPath('/', undefined, {
+      tagline: 'Read page 1 free. Pay per page after that with a BRC100 wallet.',
+      metaDescription: 'PaperTrade is a BSV newsstand where readers preview page 1 free and pay per page for independent writing with a BRC100 wallet.'
+    })
+    const readerMeta = metaForPath('/read/example/2')
+
+    expect(manifest.description).toContain('free first-page previews')
+    expect(homeMeta.description).toContain('free first-page previews')
+    expect(homeMeta.description).not.toContain('BRC100 wallet')
+    expect(readerMeta.description).toBe('Read page 1 free, then continue page by page with a compatible wallet.')
   })
 })

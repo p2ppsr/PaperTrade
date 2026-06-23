@@ -3,7 +3,7 @@ import { createRoot } from 'react-dom/client'
 import { BrowserRouter, Link, Route, Routes, useLocation, useNavigate, useParams } from 'react-router-dom'
 import { AuthFetch, Utils, WalletClient } from '@bsv/sdk'
 import { IdentityCard } from '@bsv/identity-react'
-import { Activity, BookOpen, Check, ExternalLink, FileText, Github, Home, Image, Info, Library, MessageCircle, Monitor, Palette, RefreshCw, Settings, Share2, Smartphone, Upload, User } from 'lucide-react'
+import { Activity, BookOpen, Check, ExternalLink, FileText, Github, Home, Image, Info, Library, MessageCircle, Monitor, Palette, RefreshCw, Search, Settings, Share2, Smartphone, Upload, User, X } from 'lucide-react'
 import './styles.css'
 
 type WalletSubstrate = 'auto' | 'json-api' | 'secure-json-api' | 'react-native' | 'Cicada' | 'XDM' | 'window.CWI'
@@ -174,9 +174,9 @@ const TELEMETRIED_WALLET_METHODS = new Set([
 const DEFAULT_APPEARANCE: Appearance = {
   serverName: 'PaperTrade',
   newsstandLabel: 'Newsstand',
-  tagline: 'Read page 1 free. Pay per page after that with a BRC100 wallet.',
+  tagline: 'Start reading free. Continue page by page when you are ready.',
   metaTitle: 'PaperTrade | BSV per-page publishing newsstand',
-  metaDescription: 'PaperTrade is a BSV newsstand where readers preview page 1 free and pay per page for independent writing with a BRC100 wallet.',
+  metaDescription: 'PaperTrade is a reader-first BSV newsstand for independent writing, with free first-page previews and page-by-page access.',
   theme: {
     primary: '#1f4f46',
     accent: '#b2772c',
@@ -845,7 +845,16 @@ function IdentityPill ({ identityKey, label }: { identityKey?: string | null, la
   )
 }
 
-function FeedbackPanel ({ surface }: { surface: string }): JSX.Element {
+function feedbackSurfaceForPath (pathname: string): string {
+  if (pathname.startsWith('/publication/')) return 'publication'
+  if (pathname.startsWith('/read/')) return 'reader'
+  if (pathname.startsWith('/author')) return 'author'
+  if (pathname.startsWith('/admin')) return 'admin'
+  if (pathname.startsWith('/about')) return 'about'
+  return 'newsstand'
+}
+
+function FeedbackPanel ({ surface, onClose }: { surface: string, onClose?: () => void }): JSX.Element {
   const [form, setForm] = useState({ name: '', email: '', feedback: '' })
   const [message, setMessage] = useState('')
   const submit = async (): Promise<void> => {
@@ -874,7 +883,14 @@ function FeedbackPanel ({ surface }: { surface: string }): JSX.Element {
   }
   return (
     <section className='feedback-panel'>
-      <h2><MessageCircle size={18} /> Feedback</h2>
+      <div className='panel-title-row'>
+        <h2><MessageCircle size={18} /> Feedback</h2>
+        {onClose != null && (
+          <button className='icon-button' type='button' aria-label='Close feedback' onClick={onClose}>
+            <X size={18} />
+          </button>
+        )}
+      </div>
       <form onSubmit={e => { e.preventDefault(); void submit().catch(err => setMessage(err instanceof Error ? err.message : 'Feedback could not be sent')) }}>
         <div className='feedback-grid'>
           <label>Name <input value={form.name} onChange={e => setForm({ ...form, name: e.target.value })} /></label>
@@ -886,6 +902,24 @@ function FeedbackPanel ({ surface }: { surface: string }): JSX.Element {
       <p className='hint'>Diagnostic ID: {sessionId()}</p>
       {message !== '' && <p className='notice compact'>{message}</p>}
     </section>
+  )
+}
+
+function FeedbackModal ({ surface, onClose }: { surface: string, onClose: () => void }): JSX.Element {
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent): void => {
+      if (event.key === 'Escape') onClose()
+    }
+    window.addEventListener('keydown', onKeyDown)
+    return () => window.removeEventListener('keydown', onKeyDown)
+  }, [onClose])
+
+  return (
+    <div className='feedback-modal-backdrop' role='presentation' onClick={event => { if (event.currentTarget === event.target) onClose() }}>
+      <div className='feedback-modal' role='dialog' aria-modal='true' aria-label='Feedback'>
+        <FeedbackPanel surface={surface} onClose={onClose} />
+      </div>
+    </div>
   )
 }
 
@@ -1018,6 +1052,10 @@ function useStatus (): [Status | null, () => Promise<void>] {
 
 function Shell ({ children, status }: { children: React.ReactNode, status: Status | null }): JSX.Element {
   const appearance = appearanceFromStatus(status)
+  const location = useLocation()
+  const [feedbackOpen, setFeedbackOpen] = useState(false)
+  const feedbackSurface = feedbackSurfaceForPath(location.pathname)
+  useEffect(() => setFeedbackOpen(false), [location.pathname])
   return (
     <div className='app-shell' style={appearanceStyle(appearance)}>
       <aside className='side'>
@@ -1029,16 +1067,20 @@ function Shell ({ children, status }: { children: React.ReactNode, status: Statu
         </Link>
         <nav>
           <Link to='/'><Home size={18} /> {appearance.newsstandLabel}</Link>
+          <Link to='/about'><Info size={18} /> About</Link>
           <Link to='/author'><User size={18} /> Author</Link>
           <Link to='/admin'><Settings size={18} /> Admin</Link>
-          <Link to='/about'><Info size={18} /> About</Link>
         </nav>
+        <button className='nav-feedback' type='button' onClick={() => setFeedbackOpen(true)}>
+          <MessageCircle size={18} /> Feedback
+        </button>
         <div className='status-line'>
           <span>{status?.setupComplete === true ? 'Live server' : 'Setup required'}</span>
           <span>{status?.isAdmin === true ? 'Admin' : status?.identityKey != null ? 'Reader' : 'Guest'}</span>
         </div>
       </aside>
       <main>{children}</main>
+      {feedbackOpen && <FeedbackModal surface={feedbackSurface} onClose={() => setFeedbackOpen(false)} />}
     </div>
   )
 }
@@ -1046,6 +1088,7 @@ function Shell ({ children, status }: { children: React.ReactNode, status: Statu
 function Newsstand ({ status }: { status: Status | null }): JSX.Element {
   const appearance = appearanceFromStatus(status)
   const [publications, setPublications] = useState<Publication[]>([])
+  const [query, setQuery] = useState('')
   const [loadMessage, setLoadMessage] = useState('')
   const loadPublications = async (): Promise<void> => {
     const startedAt = performance.now()
@@ -1067,16 +1110,29 @@ function Newsstand ({ status }: { status: Status | null }): JSX.Element {
     setClientMeta(appearance.metaTitle, appearance.metaDescription)
     void loadPublications()
   }, [appearance.metaDescription, appearance.metaTitle])
+  const normalizedQuery = query.trim().toLowerCase()
+  const filteredPublications = normalizedQuery === ''
+    ? publications
+    : publications.filter(pub => {
+      const haystack = `${pub.title} ${pub.description ?? ''} ${pub.authorName ?? ''}`.toLowerCase()
+      return haystack.includes(normalizedQuery)
+    })
   return (
     <section className='surface'>
       <header className='page-head newsstand-head'>
         <div>
-          <h1>{appearance.newsstandLabel}</h1>
+          <h1>{appearance.serverName}</h1>
           <p>{appearance.tagline}</p>
         </div>
       </header>
+      <div className='reader-controls'>
+        <label className='search-field'>
+          <span><Search size={18} /> Find a publication</span>
+          <input value={query} onChange={e => setQuery(e.target.value)} placeholder='Title, author, or topic' />
+        </label>
+      </div>
       <div className='publication-grid'>
-        {publications.map(pub => (
+        {filteredPublications.map(pub => (
           <article className='publication' key={pub.id}>
             <Link className='publication-cover' to={`/publication/${pub.id}`} aria-label={`Open ${pub.title}`}>
               <img src={pub.coverUrl ?? `${API}/publications/${pub.id}/cover`} alt='' loading='lazy' />
@@ -1100,13 +1156,14 @@ function Newsstand ({ status }: { status: Status | null }): JSX.Element {
           </div>
         )}
         {publications.length === 0 && loadMessage === '' && <p className='empty'>No publications are live yet.</p>}
+        {publications.length > 0 && filteredPublications.length === 0 && loadMessage === '' && <p className='empty'>No publications match that search.</p>}
       </div>
       <FeedbackPanel surface='newsstand' />
     </section>
   )
 }
 
-function PublicationDetail (): JSX.Element {
+function PublicationDetail ({ status }: { status: Status | null }): JSX.Element {
   const { id = '' } = useParams()
   const [publication, setPublication] = useState<Publication | null>(null)
   useEffect(() => {
@@ -1132,8 +1189,10 @@ function PublicationDetail (): JSX.Element {
       <div className='facts'>
         <IdentityPill identityKey={publication.authorIdentityKey} label={publication.authorName} />
         <span>{publication.pageCount} pages</span>
+        <span>Page 1 free</span>
+        <span>{status?.pricePerPageSats ?? 25} sats per paid page</span>
       </div>
-      <Link className='button' to={`/read/${publication.id}/1`}><BookOpen size={18} /> Start reading</Link>
+      <Link className='button' to={`/read/${publication.id}/1`}><BookOpen size={18} /> Read first page free</Link>
     </section>
   )
 }
@@ -2134,7 +2193,7 @@ function AppRoutes ({ status, refresh }: { status: Status | null, refresh: () =>
       )}
       <Routes>
         <Route path='/' element={<Newsstand status={status} />} />
-        <Route path='/publication/:id' element={<PublicationDetail />} />
+        <Route path='/publication/:id' element={<PublicationDetail status={status} />} />
         <Route path='/read/:id/:pageNumber' element={<Reader status={status} />} />
         <Route path='/author' element={<Author status={status} />} />
         <Route path='/author/read/:id/:pageNumber' element={<AuthorPreview />} />

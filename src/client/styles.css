@@ -151,6 +151,19 @@ nav a:hover {
   background: color-mix(in srgb, var(--pt-primary) 10%, transparent);
 }
 
+.nav-feedback {
+  background: var(--pt-surface);
+  border: 1px solid var(--pt-border);
+  color: var(--pt-primary);
+  justify-content: flex-start;
+  min-height: 40px;
+  width: 100%;
+}
+
+.nav-feedback:hover {
+  background: var(--pt-soft);
+}
+
 .status-line {
   display: grid;
   gap: 8px;
@@ -215,6 +228,33 @@ h1 {
   display: grid;
   gap: 16px;
   grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+}
+
+.reader-controls {
+  margin: 0 0 18px;
+}
+
+.search-field {
+  background: var(--pt-surface);
+  border: 1px solid var(--pt-border);
+  border-radius: 8px;
+  color: var(--pt-text);
+  display: grid;
+  gap: 8px;
+  margin: 0;
+  max-width: 460px;
+  padding: 12px;
+}
+
+.search-field span {
+  align-items: center;
+  color: var(--pt-muted);
+  display: inline-flex;
+  gap: 8px;
+}
+
+.search-field input {
+  margin-top: 0;
 }
 
 .publication,
@@ -471,6 +511,51 @@ h1 {
 
 .feedback-panel {
   margin-top: 20px;
+}
+
+.panel-title-row {
+  align-items: center;
+  display: flex;
+  gap: 12px;
+  justify-content: space-between;
+}
+
+.icon-button {
+  background: transparent;
+  border: 1px solid var(--pt-border);
+  color: var(--pt-muted);
+  flex: 0 0 auto;
+  min-height: 36px;
+  padding: 0;
+  width: 36px;
+}
+
+.icon-button:hover {
+  background: var(--pt-soft);
+  color: var(--pt-primary);
+}
+
+.feedback-modal-backdrop {
+  align-items: center;
+  background: rgba(0, 0, 0, 0.36);
+  display: flex;
+  inset: 0;
+  justify-content: center;
+  padding: 22px;
+  position: fixed;
+  z-index: 30;
+}
+
+.feedback-modal {
+  max-height: calc(100dvh - 44px);
+  max-width: 680px;
+  overflow: auto;
+  width: min(100%, 680px);
+}
+
+.feedback-modal .feedback-panel {
+  box-shadow: 0 18px 48px rgba(0, 0, 0, 0.22);
+  margin-top: 0;
 }
 
 .share-wrap {
@@ -1030,6 +1115,16 @@ h1 {
     flex: 0 0 auto;
   }
 
+  .nav-feedback {
+    align-self: start;
+    border-radius: 999px;
+    font-size: 13px;
+    font-weight: 800;
+    min-height: 34px;
+    padding: 0 12px;
+    width: auto;
+  }
+
   .status-line {
     display: flex;
     gap: 8px;
@@ -1088,6 +1183,14 @@ h1 {
     grid-template-columns: 1fr;
   }
 
+  .reader-controls {
+    margin-bottom: 14px;
+  }
+
+  .search-field {
+    max-width: 100%;
+  }
+
   .publication-body {
     padding: 16px;
   }
@@ -1143,6 +1246,15 @@ h1 {
 
   .feedback-grid {
     grid-template-columns: 1fr;
+  }
+
+  .feedback-modal-backdrop {
+    align-items: end;
+    padding: 16px;
+  }
+
+  .feedback-modal {
+    max-height: calc(100dvh - 32px);
   }
 
   .about-grid {

@@ -30,6 +30,10 @@ const BRC29_PROTOCOL_ID = [2, '3241645161d8'] as const
 const AUTHOR_PAYOUT_PENDING_STATUSES = ['creating', 'pending_internalize']
 const WALLET_BALANCE_BASKET = '893b7646de0e1c9f741bd6e9169b76a8847ae34adef7bef1e6a285371206d2e8'
 const PAGE_ACCESS_TOKEN_TTL_MS = 90 * 1000
+const LEGACY_DEFAULT_TAGLINE = 'Read page 1 free. Pay per page after that with a BRC100 wallet.'
+const DEFAULT_READER_TAGLINE = 'Start reading free. Continue page by page when you are ready.'
+const LEGACY_DEFAULT_META_DESCRIPTION = 'PaperTrade is a BSV newsstand where readers preview page 1 free and pay per page for independent writing with a BRC100 wallet.'
+const DEFAULT_META_DESCRIPTION = 'PaperTrade is a reader-first BSV newsstand for independent writing, with free first-page previews and page-by-page access.'
 
 interface AuthenticatedRequest extends Request {
   auth?: { identityKey: string }
@@ -293,13 +297,23 @@ function urlPathFromBody (value: unknown, fallback: string | null): string | nul
   return fallback
 }
 
+function publicTagline (value: unknown): string {
+  const text = typeof value === 'string' ? value.replace(/\s+/g, ' ').trim() : ''
+  return text === '' || text === LEGACY_DEFAULT_TAGLINE ? DEFAULT_READER_TAGLINE : text
+}
+
+function publicMetaDescription (value: unknown): string {
+  const text = typeof value === 'string' ? value.replace(/\s+/g, ' ').trim() : ''
+  return text === '' || text === LEGACY_DEFAULT_META_DESCRIPTION ? DEFAULT_META_DESCRIPTION : text
+}
+
 function appearanceFromSettings (settings: any): Record<string, unknown> {
   return {
     serverName: settings.server_name ?? 'PaperTrade',
     newsstandLabel: settings.newsstand_label ?? 'Newsstand',
-    tagline: settings.tagline ?? 'Read page 1 free. Pay per page after that with a BRC100 wallet.',
+    tagline: publicTagline(settings.tagline),
     metaTitle: settings.meta_title ?? 'PaperTrade | BSV per-page publishing newsstand',
-    metaDescription: settings.meta_description ?? 'PaperTrade is a BSV newsstand where readers preview page 1 free and pay per page for independent writing with a BRC100 wallet.',
+    metaDescription: publicMetaDescription(settings.meta_description),
     theme: {
       primary: settings.theme_primary ?? '#1f4f46',
       accent: settings.theme_accent ?? '#b2772c',
@@ -320,9 +334,9 @@ function appearanceUpdateFromBody (input: AppearanceInput, current: any): Record
   return {
     server_name: boundedText(input.serverName, current.server_name ?? 'PaperTrade', 120),
     newsstand_label: boundedText(input.newsstandLabel, current.newsstand_label ?? 'Newsstand', 80),
-    tagline: boundedText(input.tagline, current.tagline ?? 'Read page 1 free. Pay per page after that with a BRC100 wallet.', 260),
+    tagline: boundedText(input.tagline, current.tagline ?? DEFAULT_READER_TAGLINE, 260),
     meta_title: boundedText(input.metaTitle, current.meta_title ?? 'PaperTrade | BSV per-page publishing newsstand', 160),
-    meta_description: optionalBoundedText(input.metaDescription, 260) ?? current.meta_description ?? 'PaperTrade is a BSV newsstand where readers preview page 1 free and pay per page for independent writing with a BRC100 wallet.',
+    meta_description: optionalBoundedText(input.metaDescription, 260) ?? current.meta_description ?? DEFAULT_META_DESCRIPTION,
     theme_primary: colorFromBody(theme.primary, current.theme_primary ?? '#1f4f46'),
     theme_accent: colorFromBody(theme.accent, current.theme_accent ?? '#b2772c'),
     theme_background: colorFromBody(theme.background, current.theme_background ?? '#f7f5ef'),
@@ -725,7 +739,7 @@ async function processAndStorePublicationUpload (
 
 async function removeSeedTestData (): Promise<void> {
   const publications = await db('publications')
-    .where('title', 'like', 'test pub%')
+    .whereRaw('(lower(title) = ? or title like ?)', ['test', 'test pub%'])
     .select('id')
 
   if (publications.length === 0) return
@@ -748,6 +762,11 @@ async function removeSeedTestData (): Promise<void> {
   await Promise.all(publicationIds.map(async publicationId => {
     await fs.rm(getPublicationDir(publicationId), { recursive: true, force: true })
   }))
+}
+
+function isInternalTestPublication (row: Record<string, unknown>): boolean {
+  const title = typeof row.title === 'string' ? row.title.trim().toLowerCase() : ''
+  return title === 'test' || title.startsWith('test pub')
 }
 
 async function starterNeedsProcessing (publicationId: string): Promise<boolean> {
@@ -1129,7 +1148,7 @@ async function createApp (): Promise<express.Express> {
       .where('publications.status', 'published')
       .select('publications.*', 'authors.display_name')
       .orderBy('publications.published_at', 'desc')
-    res.json({ status: 'success', publications: rows.map(publicPublicationFields) })
+    res.json({ status: 'success', publications: rows.filter(row => !isInternalTestPublication(row)).map(publicPublicationFields) })
   })
 
   api.get('/publications/:id', async (req, res) => {

@@ -41,12 +41,15 @@ export interface AppearanceMeta {
 }
 
 const DEFAULT_ORIGIN = 'https://papertrade.metanet.app'
-const DEFAULT_DESCRIPTION = 'PaperTrade is a BSV newsstand where readers preview page 1 free and pay per page for independent writing with a BRC100 wallet.'
+const LEGACY_DEFAULT_TAGLINE = 'Read page 1 free. Pay per page after that with a BRC100 wallet.'
+const DEFAULT_TAGLINE = 'Start reading free. Continue page by page when you are ready.'
+const LEGACY_DEFAULT_DESCRIPTION = 'PaperTrade is a BSV newsstand where readers preview page 1 free and pay per page for independent writing with a BRC100 wallet.'
+const DEFAULT_DESCRIPTION = 'PaperTrade is a reader-first BSV newsstand for independent writing, with free first-page previews and page-by-page access.'
 const THEME_COLOR = '#1f4f46'
 const DEFAULT_APPEARANCE: Required<Omit<AppearanceMeta, 'theme'>> & { theme: Required<NonNullable<AppearanceMeta['theme']>> } = {
   serverName: 'PaperTrade',
   newsstandLabel: 'Newsstand',
-  tagline: 'Read page 1 free. Pay per page after that with a BRC100 wallet.',
+  tagline: DEFAULT_TAGLINE,
   metaTitle: 'PaperTrade | BSV per-page publishing newsstand',
   metaDescription: DEFAULT_DESCRIPTION,
   logoUrl: null,
@@ -95,15 +98,25 @@ function safeJsonScript (value: Record<string, unknown>): string {
   return JSON.stringify(value).replace(/</g, '\\u003c')
 }
 
+function normalizedTagline (value?: string): string {
+  const text = value?.replace(/\s+/g, ' ').trim() ?? ''
+  return text === '' || text === LEGACY_DEFAULT_TAGLINE ? DEFAULT_TAGLINE : text
+}
+
+function normalizedDescription (value?: string): string {
+  const text = value?.replace(/\s+/g, ' ').trim() ?? ''
+  return text === '' || text === LEGACY_DEFAULT_DESCRIPTION ? DEFAULT_DESCRIPTION : text
+}
+
 function normalizeAppearance (appearance?: AppearanceMeta | null): typeof DEFAULT_APPEARANCE {
   return {
     ...DEFAULT_APPEARANCE,
     ...appearance,
     serverName: appearance?.serverName?.trim() !== '' && appearance?.serverName != null ? appearance.serverName : DEFAULT_APPEARANCE.serverName,
     newsstandLabel: appearance?.newsstandLabel?.trim() !== '' && appearance?.newsstandLabel != null ? appearance.newsstandLabel : DEFAULT_APPEARANCE.newsstandLabel,
-    tagline: appearance?.tagline?.trim() !== '' && appearance?.tagline != null ? appearance.tagline : DEFAULT_APPEARANCE.tagline,
+    tagline: normalizedTagline(appearance?.tagline),
     metaTitle: appearance?.metaTitle?.trim() !== '' && appearance?.metaTitle != null ? appearance.metaTitle : DEFAULT_APPEARANCE.metaTitle,
-    metaDescription: appearance?.metaDescription?.trim() !== '' && appearance?.metaDescription != null ? appearance.metaDescription : DEFAULT_APPEARANCE.metaDescription,
+    metaDescription: normalizedDescription(appearance?.metaDescription),
     logoUrl: appearance?.logoUrl ?? null,
     iconUrl: appearance?.iconUrl ?? null,
     ogImageUrl: appearance?.ogImageUrl ?? null,
@@ -325,7 +338,7 @@ export function metaForPath (pathName: string, publication?: PublicPublicationMe
   const isReader = pathName.startsWith('/read/')
   return {
     title: isReader ? `Read on ${app.serverName}` : app.metaTitle,
-    description: isReader ? `Read page 1 free, then use a BRC100 wallet for paid ${app.serverName} pages.` : trimDescription(app.metaDescription),
+    description: isReader ? 'Read page 1 free, then continue page by page with a compatible wallet.' : trimDescription(app.metaDescription),
     canonicalPath: isReader ? pathName : '/',
     imagePath: app.ogImageUrl ?? '/og-image.svg',
     siteName: app.serverName,
