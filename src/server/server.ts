@@ -859,16 +859,6 @@ async function createApp (): Promise<express.Express> {
   await fs.mkdir(DATA_DIR, { recursive: true })
   await db.migrate.latest()
   const walletBootstrap = await createServerWallet()
-  try {
-    await seedStarterWorks(walletBootstrap.publicKey)
-  } catch (err) {
-    console.warn(JSON.stringify({
-      level: 'warn',
-      service: 'papertrade',
-      event: 'starter_seed_failed',
-      message: err instanceof Error ? err.message : 'Unknown starter seed error'
-    }))
-  }
 
   async function getServerWalletBalance (): Promise<number> {
     const wallet = walletBootstrap.wallet
@@ -1962,6 +1952,25 @@ async function createApp (): Promise<express.Express> {
     }))
     res.status(500).json({ status: 'error', message: err.message !== '' ? err.message : 'Internal server error' })
   })
+
+  setTimeout(() => {
+    void seedStarterWorks(walletBootstrap.publicKey)
+      .then(() => {
+        console.log(JSON.stringify({
+          level: 'info',
+          service: 'papertrade',
+          event: 'starter_seed_complete'
+        }))
+      })
+      .catch(err => {
+        console.warn(JSON.stringify({
+          level: 'warn',
+          service: 'papertrade',
+          event: 'starter_seed_failed',
+          message: err instanceof Error ? err.message : 'Unknown starter seed error'
+        }))
+      })
+  }, 1000)
 
   return app
 }
