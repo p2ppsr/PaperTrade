@@ -8,7 +8,7 @@ RUN npm ci && npm cache clean --force
 COPY . .
 RUN npm run build
 
-ARG RUNTIME_BASE_IMAGE=registry.cars-operator-system.svc.cluster.local:5000/p2ppsr/papertrade-runtime-base:node22-bookworm-docs-2026-06-11
+ARG RUNTIME_BASE_IMAGE=papertrade-runtime-base:local
 FROM ${RUNTIME_BASE_IMAGE}
 
 ENV NODE_ENV=production

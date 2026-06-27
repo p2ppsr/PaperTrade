@@ -1,9 +1,28 @@
 {
   "name": "papertrade",
   "version": "0.1.0",
-  "private": true,
   "type": "module",
-  "description": "PaperTrade: a BSV content newsstand",
+  "description": "Open-source BSV newsstand for pay-per-page publishing with BRC100 wallets.",
+  "license": "Open BSV License",
+  "homepage": "https://papertrade.metanet.app",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/p2ppsr/PaperTrade.git"
+  },
+  "bugs": {
+    "url": "https://github.com/p2ppsr/PaperTrade/issues"
+  },
+  "keywords": [
+    "bsv",
+    "brc100",
+    "bitcoin-sv",
+    "payments",
+    "publishing",
+    "newsstand",
+    "react",
+    "express",
+    "typescript"
+  ],
   "scripts": {
     "dev": "concurrently \"vite --host 0.0.0.0\" \"tsx watch src/server/server.ts\"",
     "build:client": "vite build",
