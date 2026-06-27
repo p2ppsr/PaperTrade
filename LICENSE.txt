@@ -1,3 +1,10 @@
+PaperTrade
+
+Copyright (c) 2026 P2PPSR
+
+PaperTrade is licensed under the Open BSV License version 4. The license text
+follows.
+
 Open BSV License version 4
 
 Copyright (c) 2023 BSV Blockchain Association ("Bitcoin Association")

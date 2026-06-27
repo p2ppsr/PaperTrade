@@ -42,3 +42,7 @@ https://github.com/p2ppsr/PaperTrade
 PaperTrade is not just a mockup. The repo includes the React app, Express API,
 Knex migrations, BRC100 auth/payment integration, document rendering, author
 ledger, UserCom feedback/signals, Kubernetes manifests, and CI.
+
+## License Line
+
+Open BSV License. Copyright (c) 2026 P2PPSR.

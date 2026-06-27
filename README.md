@@ -125,5 +125,5 @@ Security reports should follow [SECURITY.md](SECURITY.md).
 
 ## License
 
-PaperTrade is released under the Open BSV License. See
+PaperTrade is copyright (c) 2026 P2PPSR and released under the Open BSV License. See
 [LICENSE.txt](LICENSE.txt).
