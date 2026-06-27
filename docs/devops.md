@@ -1,13 +1,12 @@
 # PaperTrade DevOps
 
-PaperTrade production runs on the Project Babbage private infrastructure Kubernetes cluster and uses the
-local registry at `10.152.183.28:5000` for pushes and
-`registry.cars-operator-system.svc.cluster.local:5000` for cluster pulls.
+PaperTrade production runs on Project Babbage private Kubernetes infrastructure
+and uses a private local registry for image pushes and cluster pulls.
 
 These notes document the live Project Babbage production shape. Public
 self-hosters can use the manifests and scripts as references, but the GitHub
-Actions workflow and registry defaults assume private Project Babbage private infrastructure infrastructure
-and production secrets.
+Actions workflow and registry defaults assume private infrastructure and
+production secrets.
 
 ## Image Strategy
 
@@ -22,7 +21,7 @@ The runtime base image should change only when the OS, Node major version, or
 document conversion tooling changes. Normal PaperTrade source deployments should
 build only the app image.
 
-For a local Docker build outside Project Babbage private infrastructure:
+For a local Docker build outside Project Babbage infrastructure:
 
 ```bash
 docker build -f Dockerfile.runtime-base -t papertrade-runtime-base:local .
@@ -74,10 +73,9 @@ IMAGE_TAG=<tag> SQL_DATABASE_USER=<user> SQL_DATABASE_PASSWORD=<password> script
 
 ## GitHub Actions
 
-`.github/workflows/deploy-production-local.yml` runs on the Project Babbage private infrastructure
-self-hosted runner labels:
+`.github/workflows/deploy-production-local.yml` runs on private self-hosted
+runner labels:
 
-- `private-production-local-deploy`
 - `linux-amd64`
 - `docker`
 - `kubectl`

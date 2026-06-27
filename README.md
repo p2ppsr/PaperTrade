@@ -98,8 +98,8 @@ docs/                     Operator and contributor documentation
 
 The repository includes Kubernetes manifests and GitHub Actions for the live
 PaperTrade production deployment, but those workflows target Project Babbage's
-Project Babbage private infrastructure infrastructure and private secrets. Self-hosters should treat them
-as a working reference architecture, not a one-command public deploy.
+private infrastructure and production secrets. Self-hosters should treat them as
+a working reference architecture, not a one-command public deploy.
 
 Start with [docs/devops.md](docs/devops.md) if you want to run a similar
 Kubernetes deployment.

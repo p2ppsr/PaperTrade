@@ -27,7 +27,6 @@ jobs:
   deploy:
     runs-on:
       - self-hosted
-      - private-production-local-deploy
       - linux-amd64
       - docker
       - kubectl
@@ -51,7 +50,7 @@ jobs:
             git checkout --detach "${{ github.event.inputs.source_sha }}"
           fi
           echo "SOURCE_SHA=$(git rev-parse HEAD)" >> "$GITHUB_ENV"
-      - name: Local deploy preflight
+      - name: Deploy preflight
         run: |
           set -euo pipefail
           "${KUBECTL}" version --client
