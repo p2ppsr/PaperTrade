@@ -1,0 +1,224 @@
+proofrunVersion: 1
+id: papertrade-admin-review-ledger-payout
+name: PaperTrade admin review, ledger, and payout lifecycle
+surface:
+  repo: p2ppsr/PaperTrade
+  workspace: /Users/tyeverett/projects/PaperTrade
+  dossier: /Users/tyeverett/projects/network-ops/docs/repos/p2ppsr/PaperTrade.md
+  category: admin
+  audience: "An authorized PaperTrade operator validating publication review, reader purchase accounting, author balance, and payout handling."
+environment:
+  kind: production
+  baseUrl: https://papertrade.metanet.app
+  healthEndpoints:
+    - https://papertrade.metanet.app/healthz
+    - https://papertrade.metanet.app/api/status
+  deployment:
+    system: github-actions
+    workflow: Deploy Production Local Kubernetes
+    namespace: papertrade-prod
+    workload: deployment/papertrade
+    releaseSource: "Capture current commit, workflow run, image tag, image digest, and pod name during preflight."
+safety:
+  stateChanging: true
+  spendCap:
+    amount: 250
+    unit: sats
+  testIdentities:
+    - purpose: admin
+      source: "Approved PaperTrade admin wallet identity. Do not record private keys, seed phrases, or raw auth payloads."
+    - purpose: author
+      source: "Approved ProofRun author identity with a test publication and expected balance."
+    - purpose: reader
+      source: "Approved funded ProofRun reader wallet for a low-value paid-page purchase."
+    - purpose: server
+      source: "PaperTrade server wallet in production secrets. Do not print or copy secret values."
+  cleanup:
+    required: true
+    instructions: "Use ProofRun-prefixed content and low-value balances. Unpublish or return test publications after evidence capture when appropriate. Payout records may remain as financial audit evidence and must be documented."
+matrix:
+  desktopBrowsers:
+    - chrome
+  mobileBrowsers: []
+  mobileSimulators:
+    - android-emulator
+  desktopWallets:
+    - localhost-json-api-wallet-bridge
+    - bsv-browser
+  mobileWallets:
+    - metanet-explorer-android
+  serverWallets:
+    - papertrade-server-wallet
+  networks:
+    - mainnet
+preflight:
+  commands:
+    - description: Check production health
+      command: curl -fsS https://papertrade.metanet.app/healthz
+      cwd: /Users/tyeverett/projects/PaperTrade
+    - description: Check production status and pricing
+      command: curl -fsS https://papertrade.metanet.app/api/status
+      cwd: /Users/tyeverett/projects/PaperTrade
+    - description: Capture production rollout state
+      command: /Users/tyeverett/projects/network-ops/scripts/ops/kubectl.sh -n papertrade-prod get deploy papertrade -o wide
+      cwd: /Users/tyeverett/projects/network-ops
+    - description: Tail production logs before lifecycle test
+      command: /Users/tyeverett/projects/network-ops/scripts/ops/kubectl.sh -n papertrade-prod logs deploy/papertrade --since=30m
+      cwd: /Users/tyeverett/projects/network-ops
+  requiredState:
+    - "An approved admin wallet identity can access /admin."
+    - "An approved author/test publication exists or the author submission ProofRun is run first."
+    - "An approved reader wallet has enough funds for one low-value page purchase."
+    - "PaperTrade server wallet has enough spendable balance for any payout branch being executed, or payout creation is expected to warn/fail with clear operator guidance."
+    - "The exact cleanup plan is documented before making admin changes."
+flow:
+  steps:
+    - id: authenticate-admin
+      actor: admin
+      action: "Open /admin and approve the wallet auth/access request."
+      expected:
+        ui:
+          - "Admin workspace loads only for the approved admin identity."
+          - "Admin tabs for Publications, Settings/Admins, and Payouts are visible and usable."
+        wallet:
+          - "Auth succeeds without payment."
+        telemetry:
+          - "page.view, wallet.prompt_shown, and wallet.action_succeeded are emitted as applicable."
+      timing:
+        thresholdMs: 10000
+    - id: review-publication
+      actor: admin
+      action: "Review the ProofRun author publication and publish, reject, unpublish, or return to review according to the planned branch."
+      expected:
+        ui:
+          - "The admin can inspect metadata and rendered preview before changing status."
+          - "Status change produces clear confirmation."
+        domain:
+          - "Publication status changes exactly once to the selected target state."
+          - "Public catalog visibility matches published/unpublished status."
+        telemetry:
+          - "One of admin.publication_submitted, admin.publication_published, admin.publication_rejected, admin.publication_unpublished, or admin.publication_returned_to_review is emitted."
+      timing:
+        thresholdMs: 15000
+    - id: generate-author-balance
+      actor: reader
+      action: "If no qualifying balance exists, run a low-value paid-page purchase against the published ProofRun publication or selected test publication."
+      expected:
+        ui:
+          - "The reader receives the paid page after approval."
+        domain:
+          - "Author balance increases by the expected net amount and platform commission is represented correctly."
+        telemetry:
+          - "reader.paid_page_unlocked is emitted and can be correlated to ledger state."
+      timing:
+        thresholdMs: 45000
+    - id: inspect-ledger-and-create-payout
+      actor: admin
+      action: "Open the Payouts section, inspect author balances, and create or prepare the payout according to the spend cap and server-wallet readiness."
+      expected:
+        ui:
+          - "Author balances are understandable and selectable."
+          - "Payout creation has a clear result: created, pending wallet receipt, succeeded, or actionable failure."
+        domain:
+          - "A payout record is created only when amount, author, and server wallet balance are valid."
+          - "Failed payout attempts record a safe failure reason without corrupting balance state."
+        telemetry:
+          - "payout.created, payout.succeeded, or payout.failed is emitted according to result."
+      timing:
+        thresholdMs: 30000
+    - id: author-receives-or-retries-payout
+      actor: author
+      action: "Open /author and complete wallet receipt for a pending payout, or verify actionable retry/support state if receipt cannot be completed."
+      expected:
+        ui:
+          - "Author payout state is clear and does not imply funds received before wallet receipt."
+          - "Retry wallet receipt and payout support are visible when needed."
+        wallet:
+          - "If internalization succeeds, the wallet confirms receipt."
+        domain:
+          - "Payout status moves to succeeded or remains pending/failed with correct reason."
+        telemetry:
+          - "payout.succeeded or payout.failed is emitted according to outcome."
+      timing:
+        thresholdMs: 30000
+    - id: cleanup-test-state
+      actor: admin
+      action: "Apply the documented cleanup plan for ProofRun publication/admin changes where appropriate."
+      expected:
+        domain:
+          - "Cleanup changes are recorded in run evidence."
+          - "Financial audit records are not deleted or obscured."
+        telemetry:
+          - "Cleanup status changes emit the appropriate admin event."
+assertions:
+  uiAppearance:
+    - "Admin, payout, author, and reader states remain usable on required desktop and selected wallet/mobile substrate."
+    - "Tabs, forms, balance rows, payout actions, and confirmations do not overlap or hide critical data."
+  audienceIntuition:
+    - "An operator can understand publication status, author balances, payout readiness, and failure reasons without reading source code."
+    - "Authors can understand whether a payout is received, pending wallet receipt, or failed."
+  customerTrust:
+    - "Reader payment, author balance, platform commission, and payout state are internally consistent."
+    - "No UI claims funds or publication status that the backend has not recorded."
+    - "Failures explain whether the issue is server wallet funding, author wallet receipt, invalid amount, or permissions."
+  flowSuccess:
+    - "Admin auth is enforced."
+    - "Publication review action changes state exactly as intended."
+    - "A reader purchase produces the expected ledger/balance effect."
+    - "Payout lifecycle reaches succeeded or a correct pending/failed state with no balance corruption."
+  telemetryObservability:
+    - "Admin publication events, paid-page conversion, and payout lifecycle events are queryable with source papertrade."
+    - "Logs and telemetry have no private keys, seed phrases, raw transactions, JWTs, cookies, raw signatures, or wallet storage secrets."
+  reliabilityRepeatability:
+    - "The flow can be rerun with a new ProofRun publication/run id."
+    - "Cleanup and audit boundaries are documented so repeated runs do not pollute production catalog."
+  performance:
+    - "Admin workspace auth to ready <= 10s."
+    - "Publication status action confirmation <= 15s."
+    - "Payout creation result <= 30s."
+    - "Author payout receipt or actionable failure <= 30s."
+evidence:
+  publicSafe:
+    - "Run record in docs/proofrun/runs/."
+    - "Screenshots of admin publication state, ledger/balance, payout result, and author payout state with sensitive values redacted."
+    - "Sanitized event names/timestamps and status ids."
+  privateArtifacts:
+    - "network-ops/artifacts/proofrun/p2ppsr/PaperTrade/<timestamp>-admin-review-ledger-payout/"
+telemetry:
+  expectedEvents:
+    - name: page.view
+      required: true
+    - name: wallet.prompt_shown
+      required: true
+    - name: wallet.action_succeeded
+      required: true
+    - name: reader.paid_page_unlocked
+      required: true
+    - name: admin.publication_published
+      required: false
+    - name: admin.publication_rejected
+      required: false
+    - name: admin.publication_unpublished
+      required: false
+    - name: admin.publication_returned_to_review
+      required: false
+    - name: payout.created
+      required: false
+    - name: payout.succeeded
+      required: false
+    - name: payout.failed
+      required: false
+  acceptanceRule: "At least one admin publication lifecycle event is required. At least one payout lifecycle event is required if the payout branch is executed; if server-wallet funding is insufficient, the run may pass admin review but must mark payout as warn or blocked with evidence."
+  queryInstructions: "Query UserCom for source=papertrade and the run id, then correlate admin, reader conversion, and payout events to sanitized production logs. Do not print server wallet secrets, private author identity material, or raw transaction payloads."
+performanceThresholds:
+  firstMeaningfulContentMs: 3000
+  uiFeedbackAfterActionMs: 500
+  walletPromptShownMs: 5000
+  approvalToConfirmationMs: 10000
+  fullFlowMs: 180000
+  telemetryVisibleMs: 60000
+recording:
+  runRecordTemplate: /Users/tyeverett/projects/network-ops/docs/runbooks/proofrun-run-record-template.md
+  productRunPath: docs/proofrun/runs/<YYYYMMDDTHHMMSSZ>-papertrade-admin-review-ledger-payout.md
+  updateDossier: true
+  updateReadinessRegistry: true

@@ -1,0 +1,193 @@
+proofrunVersion: 1
+id: papertrade-reader-paid-page-purchase
+name: PaperTrade reader paid page purchase
+surface:
+  repo: p2ppsr/PaperTrade
+  workspace: /Users/tyeverett/projects/PaperTrade
+  dossier: /Users/tyeverett/projects/network-ops/docs/repos/p2ppsr/PaperTrade.md
+  category: pay
+  audience: "A reader with a funded BRC100-compatible wallet who wants to continue reading after the free first page."
+environment:
+  kind: production
+  baseUrl: https://papertrade.metanet.app
+  healthEndpoints:
+    - https://papertrade.metanet.app/healthz
+    - https://papertrade.metanet.app/api/status
+    - https://papertrade.metanet.app/api/publications
+  deployment:
+    system: github-actions
+    workflow: Deploy Production Local Kubernetes
+    namespace: papertrade-prod
+    workload: deployment/papertrade
+    releaseSource: "Capture current commit, workflow run, image tag, image digest, and pod name during preflight."
+safety:
+  stateChanging: true
+  spendCap:
+    amount: 100
+    unit: sats
+  testIdentities:
+    - purpose: reader
+      source: "Approved funded ProofRun reader wallet in Metanet Explorer, BSV Browser, or local desktop wallet bridge. Do not record seed phrase, private key, auth token, raw signature, raw transaction, or wallet storage secret."
+  cleanup:
+    required: false
+    instructions: "Reader entitlement and ledger entries may remain as production evidence. Use a low-value public-domain publication and document the purchased publication/page."
+matrix:
+  desktopBrowsers:
+    - chrome
+  mobileBrowsers: []
+  mobileSimulators:
+    - android-emulator
+  desktopWallets:
+    - localhost-json-api-wallet-bridge
+    - bsv-browser
+  mobileWallets:
+    - metanet-explorer-android
+  serverWallets:
+    - papertrade-server-wallet
+  networks:
+    - mainnet
+preflight:
+  commands:
+    - description: Check PaperTrade worktree
+      command: git status --short --branch
+      cwd: /Users/tyeverett/projects/PaperTrade
+    - description: Check production health
+      command: curl -fsS https://papertrade.metanet.app/healthz
+      cwd: /Users/tyeverett/projects/PaperTrade
+    - description: Check current pricing and setup status
+      command: curl -fsS https://papertrade.metanet.app/api/status
+      cwd: /Users/tyeverett/projects/PaperTrade
+    - description: Check catalog for a paid-page candidate
+      command: curl -fsS https://papertrade.metanet.app/api/publications
+      cwd: /Users/tyeverett/projects/PaperTrade
+    - description: Capture production rollout state
+      command: /Users/tyeverett/projects/network-ops/scripts/ops/kubectl.sh -n papertrade-prod get deploy papertrade -o wide
+      cwd: /Users/tyeverett/projects/network-ops
+    - description: Tail production logs around the run window
+      command: /Users/tyeverett/projects/network-ops/scripts/ops/kubectl.sh -n papertrade-prod logs deploy/papertrade --since=20m
+      cwd: /Users/tyeverett/projects/network-ops
+  requiredState:
+    - "Production health returns ok:true and setupComplete:true."
+    - "The selected publication has pageCount >= 2 and page 1 can be opened free."
+    - "Current pricePerPageSats is known and the run spend cap is greater than or equal to the page price plus fees."
+    - "The selected reader wallet is authenticated, funded, and approved for a real mainnet low-value spend."
+    - "The operator has a UserCom query path for source=papertrade."
+flow:
+  steps:
+    - id: open-free-page
+      actor: target-reader
+      action: "Open a selected publication, read page 1, and click or navigate to page 2."
+      expected:
+        ui:
+          - "The free page is visible before payment."
+          - "The continuation action makes it clear that the next page is paid."
+        telemetry:
+          - "reader.first_page_loaded is emitted before paid-page events."
+      timing:
+        thresholdMs: 3000
+    - id: start-paid-unlock
+      actor: target-reader
+      action: "Start the page 2 unlock from the reader UI."
+      expected:
+        ui:
+          - "The app shows immediate progress and does not appear frozen."
+          - "The user sees language that explains this is a wallet/payment request for unlocking the page."
+        telemetry:
+          - "reader.paid_page_unlock_started is emitted with publicationId and pageNumber 2."
+          - "wallet.prompt_shown is emitted when the wallet prompt is expected or displayed."
+      timing:
+        thresholdMs: 5000
+    - id: approve-wallet-payment
+      actor: target-reader
+      action: "Approve the wallet request for the paid page within the configured spend cap."
+      expected:
+        ui:
+          - "The wallet prompt shows a comprehensible action and amount before approval."
+          - "The app remains responsive while approval is pending."
+        wallet:
+          - "The wallet returns success for the requested BRC100/payment action."
+        telemetry:
+          - "wallet.action_succeeded is emitted after approval."
+      timing:
+        thresholdMs: 10000
+    - id: verify-paid-page
+      actor: target-reader
+      action: "Wait for PaperTrade to render page 2 after approval."
+      expected:
+        ui:
+          - "Page 2 image renders and the app gives clear success state without stale wallet-help copy."
+          - "Reader navigation still works after the paid page loads."
+        domain:
+          - "The server records or recognizes an entitlement/payment for the selected reader, publication, and page."
+          - "The author ledger and platform commission state are updated when applicable."
+        telemetry:
+          - "reader.paid_page_unlocked is emitted from the client or server with safe context."
+      timing:
+        thresholdMs: 10000
+    - id: verify-production-logs
+      actor: operator
+      action: "Inspect logs and telemetry for the run window."
+      expected:
+        logs:
+          - "No unexpected PaperTrade server errors, wallet storage errors, duplicate entitlement errors, or secret-shaped fields appear in logs."
+        telemetry:
+          - "The paid conversion sequence is queryable: page.view, reader.first_page_loaded, reader.paid_page_unlock_started, wallet.prompt_shown, wallet.action_succeeded, reader.paid_page_unlocked."
+assertions:
+  uiAppearance:
+    - "The paid-page path is usable at desktop and in the selected wallet/browser substrate."
+    - "Progress, wallet, success, and reader states do not overlap or hide controls."
+  audienceIntuition:
+    - "The reader can tell why the wallet opened and what page is being unlocked."
+    - "The app does not expose raw transaction internals as the primary explanation."
+  customerTrust:
+    - "The amount and consequence are clear before approval."
+    - "The UI never suggests duplicate charge risk while waiting."
+    - "After success, the reader can tell the paid page is available."
+  flowSuccess:
+    - "Wallet approval, PaperTrade entitlement/payment state, page image rendering, and ledger impact agree."
+    - "The selected page is not unlocked without payment unless it was already owned by the test identity."
+  telemetryObservability:
+    - "Conversion and wallet events are queryable in UserCom or the configured sink."
+    - "Telemetry distinguishes start, prompt, success, and failure states."
+    - "Telemetry contains no private keys, signatures, BEEF payloads, cookies, JWTs, or raw transactions."
+  reliabilityRepeatability:
+    - "A fresh selected page or fresh reader identity can repeat the run."
+    - "The run record captures enough identity-safe detail to rerun without guessing."
+  performance:
+    - "Wallet prompt shown <= 5s."
+    - "Approval to page confirmation <= 10s."
+    - "Full free-page-to-paid-page flow <= 45s unless the run record justifies slower wallet substrate behavior."
+evidence:
+  publicSafe:
+    - "Run record in docs/proofrun/runs/."
+    - "Screenshots of free page, pre-wallet progress, wallet-safe prompt if redacted, and paid page success."
+    - "Sanitized event names/timestamps and HTTP statuses."
+  privateArtifacts:
+    - "network-ops/artifacts/proofrun/p2ppsr/PaperTrade/<timestamp>-reader-paid-page-purchase/"
+telemetry:
+  expectedEvents:
+    - name: page.view
+      required: true
+    - name: reader.first_page_loaded
+      required: true
+    - name: reader.paid_page_unlock_started
+      required: true
+    - name: wallet.prompt_shown
+      required: true
+    - name: wallet.action_succeeded
+      required: true
+    - name: reader.paid_page_unlocked
+      required: true
+  queryInstructions: "Query UserCom for source=papertrade, conversion:paid_page, the run timestamp/session, selected route, and publicationId/pageNumber. Cross-check production logs for server-side paid-page unlock evidence. Redact identity keys unless they are deliberately designated test identifiers."
+performanceThresholds:
+  firstMeaningfulContentMs: 2000
+  uiFeedbackAfterActionMs: 500
+  walletPromptShownMs: 5000
+  approvalToConfirmationMs: 10000
+  fullFlowMs: 45000
+  telemetryVisibleMs: 60000
+recording:
+  runRecordTemplate: /Users/tyeverett/projects/network-ops/docs/runbooks/proofrun-run-record-template.md
+  productRunPath: docs/proofrun/runs/<YYYYMMDDTHHMMSSZ>-papertrade-reader-paid-page-purchase.md
+  updateDossier: true
+  updateReadinessRegistry: true

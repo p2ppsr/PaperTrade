@@ -1,0 +1,177 @@
+proofrunVersion: 1
+id: papertrade-wallet-failure-recovery
+name: PaperTrade wallet missing, denied, timeout, and recovery
+surface:
+  repo: p2ppsr/PaperTrade
+  workspace: /Users/tyeverett/projects/PaperTrade
+  dossier: /Users/tyeverett/projects/network-ops/docs/repos/p2ppsr/PaperTrade.md
+  category: recovery
+  audience: "A reader who tries to continue past page 1 without a supported wallet, denies a wallet request, or experiences a wallet timeout."
+environment:
+  kind: production
+  baseUrl: https://papertrade.metanet.app
+  healthEndpoints:
+    - https://papertrade.metanet.app/healthz
+    - https://papertrade.metanet.app/api/status
+    - https://papertrade.metanet.app/api/publications
+  deployment:
+    system: github-actions
+    workflow: Deploy Production Local Kubernetes
+    namespace: papertrade-prod
+    workload: deployment/papertrade
+    releaseSource: "Capture current commit, workflow run, image tag, image digest, and pod name during preflight."
+safety:
+  stateChanging: false
+  spendCap:
+    amount: 0
+    unit: sats
+  testIdentities:
+    - purpose: reader
+      source: "Optional test wallet for denial/timeout branches. Missing-wallet branch must use a clean browser with no wallet substrate."
+  cleanup:
+    required: false
+    instructions: "Do not approve payment. If an unexpected payment succeeds, mark the run fail and record the entitlement as accidental state."
+matrix:
+  desktopBrowsers:
+    - chrome
+    - safari
+  mobileBrowsers:
+    - ios-safari
+    - android-chrome
+  mobileSimulators:
+    - android-emulator
+  desktopWallets:
+    - localhost-json-api-wallet-bridge
+    - bsv-browser
+  mobileWallets:
+    - metanet-explorer-android
+  serverWallets: []
+  networks:
+    - mainnet
+preflight:
+  commands:
+    - description: Check production health
+      command: curl -fsS https://papertrade.metanet.app/healthz
+      cwd: /Users/tyeverett/projects/PaperTrade
+    - description: Check paid page unauthorized API behavior
+      command: "node -e \"fetch('https://papertrade.metanet.app/api/publications').then(r=>r.json()).then(async j=>{const p=j.publications?.[0]; if(!p) throw new Error('no publication'); const res=await fetch('https://papertrade.metanet.app/api/publications/'+p.id+'/pages/2?format=json'); console.log(res.status); console.log(await res.text())})\""
+      cwd: /Users/tyeverett/projects/PaperTrade
+    - description: Capture production rollout state
+      command: /Users/tyeverett/projects/network-ops/scripts/ops/kubectl.sh -n papertrade-prod get deploy papertrade -o wide
+      cwd: /Users/tyeverett/projects/network-ops
+  requiredState:
+    - "A clean non-wallet browser context is available."
+    - "A wallet substrate that can deny/cancel a prompt is available for denial testing, or the branch is marked blocked."
+    - "A controlled timeout or unavailable wallet bridge can be created without approving payment, or the branch is marked blocked."
+    - "The selected publication has a paid page 2."
+flow:
+  steps:
+    - id: missing-wallet-browser
+      actor: target-reader
+      action: "Open page 2 in a clean browser with no supported wallet substrate."
+      expected:
+        ui:
+          - "The page does not spin indefinitely."
+          - "The app explains that a BRC100-compatible wallet is needed."
+          - "The app offers useful next actions such as reading page 1, opening Help, or getting a supported wallet."
+        domain:
+          - "No entitlement, payment, or ledger entry is created."
+        telemetry:
+          - "reader.paid_page_unlock_started or wallet attempt telemetry may emit, followed by reader.paid_page_failed and/or wallet.action_failed."
+      timing:
+        thresholdMs: 10000
+    - id: deny-wallet-prompt
+      actor: target-reader
+      action: "Open page 2 in a supported wallet browser or bridge and deny/cancel the wallet prompt."
+      expected:
+        ui:
+          - "The app returns to a clear recoverable failure state."
+          - "The user can retry or return to page 1."
+          - "The UI does not say the page is unlocked."
+        wallet:
+          - "The wallet reports denial/cancel without submitting payment."
+        telemetry:
+          - "wallet.action_failed and reader.paid_page_failed are emitted with safe failure context."
+      timing:
+        thresholdMs: 15000
+    - id: timeout-wallet-request
+      actor: operator
+      action: "Use a controlled unavailable wallet bridge, simulator state, or network block to cause a wallet timeout without approving payment."
+      expected:
+        ui:
+          - "The app exits pending state within the documented timeout."
+          - "The message distinguishes timeout from missing wallet when possible."
+          - "The app does not keep a stale overlay or frozen control."
+        telemetry:
+          - "wallet.request_failed or wallet.action_failed is emitted with timeout context."
+      timing:
+        thresholdMs: 45000
+    - id: recover-with-valid-wallet
+      actor: target-reader
+      action: "Restore the supported wallet substrate and retry only if the operator approves a spend under the paid-page purchase flow; otherwise retry should reach prompt without charging."
+      expected:
+        ui:
+          - "Retry starts a fresh wallet request and does not reuse stale failure state."
+          - "The reader can return to page 1 and continue browsing."
+        domain:
+          - "No payment occurs unless the operator explicitly continues under the paid-page purchase ProofRun."
+assertions:
+  uiAppearance:
+    - "Failure states fit mobile and desktop layouts without clipped wallet-help text or hidden buttons."
+    - "Retry, page 1, help, and wallet setup actions remain visible and tappable."
+  audienceIntuition:
+    - "The target reader can understand whether the problem is missing wallet, denied request, timeout, or retryable wallet connection."
+    - "The app avoids implementation-only errors as primary user text."
+  customerTrust:
+    - "The reader is never left wondering whether a payment happened."
+    - "The app does not invite blind repeated clicks while a payment may be pending."
+  flowSuccess:
+    - "Each failure branch produces no entitlement, no author ledger credit, and no platform commission."
+    - "Recovery from a failure starts from clean UI state."
+  telemetryObservability:
+    - "Failure telemetry is distinguishable by cause where available."
+    - "Logs and telemetry contain no raw auth signatures, raw transactions, cookies, JWTs, private keys, or seed material."
+  reliabilityRepeatability:
+    - "Missing-wallet and denial branches can be repeated from a clean session."
+    - "Timeout branch documents the exact simulator/bridge condition used."
+  performance:
+    - "Missing-wallet guidance appears <= 10s."
+    - "Denied prompt recovery appears <= 15s."
+    - "Timeout recovery appears within the product timeout and never exceeds 45s without a progress state."
+evidence:
+  publicSafe:
+    - "Run record in docs/proofrun/runs/."
+    - "Screenshots of missing-wallet, denied, timeout, and retry states."
+    - "Sanitized telemetry event names and failure tags."
+  privateArtifacts:
+    - "network-ops/artifacts/proofrun/p2ppsr/PaperTrade/<timestamp>-wallet-failure-recovery/"
+telemetry:
+  expectedEvents:
+    - name: page.view
+      required: true
+    - name: reader.paid_page_unlock_started
+      required: true
+    - name: wallet.prompt_shown
+      required: false
+    - name: wallet.action_failed
+      required: true
+    - name: reader.paid_page_failed
+      required: true
+  forbiddenOrWarnEvents:
+    - name: reader.paid_page_unlocked
+      condition: "Fail if emitted for a denied, missing-wallet, or timeout branch."
+    - name: wallet.action_succeeded
+      condition: "Fail unless the run explicitly transitioned to the paid-page purchase ProofRun."
+  queryInstructions: "Query UserCom for source=papertrade and tags/status indicating wallet_failed, timeout, missing wallet, or paid_page_failed. Correlate to logs around the same timestamp and selected publication/page."
+performanceThresholds:
+  firstMeaningfulContentMs: 2000
+  uiFeedbackAfterActionMs: 500
+  walletPromptShownMs: 5000
+  approvalToConfirmationMs: 0
+  fullFlowMs: 90000
+  telemetryVisibleMs: 60000
+recording:
+  runRecordTemplate: /Users/tyeverett/projects/network-ops/docs/runbooks/proofrun-run-record-template.md
+  productRunPath: docs/proofrun/runs/<YYYYMMDDTHHMMSSZ>-papertrade-wallet-failure-recovery.md
+  updateDossier: true
+  updateReadinessRegistry: true

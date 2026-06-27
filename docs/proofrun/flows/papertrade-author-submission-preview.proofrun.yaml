@@ -1,0 +1,184 @@
+proofrunVersion: 1
+id: papertrade-author-submission-preview
+name: PaperTrade author submission and preview
+surface:
+  repo: p2ppsr/PaperTrade
+  workspace: /Users/tyeverett/projects/PaperTrade
+  dossier: /Users/tyeverett/projects/network-ops/docs/repos/p2ppsr/PaperTrade.md
+  category: publish
+  audience: "An author who wants to publish writing, preview rendered pages, and eventually earn from reader purchases."
+environment:
+  kind: production
+  baseUrl: https://papertrade.metanet.app
+  healthEndpoints:
+    - https://papertrade.metanet.app/healthz
+    - https://papertrade.metanet.app/api/status
+  deployment:
+    system: github-actions
+    workflow: Deploy Production Local Kubernetes
+    namespace: papertrade-prod
+    workload: deployment/papertrade
+    releaseSource: "Capture current commit, workflow run, image tag, image digest, and pod name during preflight."
+safety:
+  stateChanging: true
+  spendCap:
+    amount: 0
+    unit: sats
+  testIdentities:
+    - purpose: author
+      source: "Approved ProofRun author wallet identity with no private material recorded."
+    - purpose: fixture
+      source: "A public-safe multi-page PDF/docx/ePub fixture stored in the repo or private ProofRun artifacts. The fixture must contain no confidential content."
+  cleanup:
+    required: true
+    instructions: "Use a title prefixed with ProofRun and the run id. If production mode submits for review, leave it for admin ProofRun review or remove/unpublish with admin flow. If direct publish is enabled, unpublish or clearly mark as test content after evidence capture."
+matrix:
+  desktopBrowsers:
+    - chrome
+  mobileBrowsers: []
+  mobileSimulators: []
+  desktopWallets:
+    - localhost-json-api-wallet-bridge
+    - bsv-browser
+  mobileWallets:
+    - metanet-explorer-android
+  serverWallets:
+    - papertrade-server-wallet
+  networks:
+    - mainnet
+preflight:
+  commands:
+    - description: Check PaperTrade worktree
+      command: git status --short --branch
+      cwd: /Users/tyeverett/projects/PaperTrade
+    - description: Check production health
+      command: curl -fsS https://papertrade.metanet.app/healthz
+      cwd: /Users/tyeverett/projects/PaperTrade
+    - description: Check mode and publishing settings
+      command: curl -fsS https://papertrade.metanet.app/api/status
+      cwd: /Users/tyeverett/projects/PaperTrade
+    - description: Capture production rollout state
+      command: /Users/tyeverett/projects/network-ops/scripts/ops/kubectl.sh -n papertrade-prod get deploy papertrade -o wide
+      cwd: /Users/tyeverett/projects/network-ops
+  requiredState:
+    - "The author wallet is available and approved for production test publication activity."
+    - "The fixture file has at least 5 pages after conversion and contains no sensitive text."
+    - "The operator knows whether the current mode is private_publish or public_submissions."
+    - "Cleanup responsibility is explicit before submission."
+flow:
+  steps:
+    - id: open-author-workspace
+      actor: author
+      action: "Open /author with the approved author wallet substrate."
+      expected:
+        ui:
+          - "The Author workspace explains publishing status, balance, publications, and upload controls."
+          - "If wallet auth is needed, the app explains why before requesting approval."
+        telemetry:
+          - "page.view is emitted for /author."
+      timing:
+        thresholdMs: 3000
+    - id: authenticate-author
+      actor: author
+      action: "Approve the wallet auth/access request required to load the author workspace."
+      expected:
+        ui:
+          - "The workspace loads without raw identity keys as the main reader-facing language."
+          - "The author can tell which account is active."
+        wallet:
+          - "Auth succeeds without payment."
+        telemetry:
+          - "wallet.prompt_shown and wallet.action_succeeded are emitted if auth is required."
+      timing:
+        thresholdMs: 10000
+    - id: create-publication
+      actor: author
+      action: "Enter ProofRun title/description metadata and upload the public-safe multi-page fixture."
+      expected:
+        ui:
+          - "The upload process gives progress or clear processing state."
+          - "The author sees validation errors for unsupported or too-short files."
+          - "Successful processing shows page count and preview/read action."
+        domain:
+          - "The server creates a publication associated with the author identity."
+          - "Rendered pages exist for preview."
+        telemetry:
+          - "author.publication_submitted or author.publication_published is emitted according to current mode."
+      timing:
+        thresholdMs: 90000
+    - id: preview-rendered-pages
+      actor: author
+      action: "Open /author/read/<publicationId>/1 and at least one additional rendered preview page."
+      expected:
+        ui:
+          - "Preview pages render as readable images."
+          - "Back to author action is visible."
+        domain:
+          - "Preview access works for the author before public reader access."
+      timing:
+        thresholdMs: 5000
+    - id: verify-publication-state
+      actor: operator
+      action: "Inspect UI, API if available, telemetry, and logs for the new publication."
+      expected:
+        domain:
+          - "Publication status matches current mode: submitted/review if review is required, published if direct publishing is enabled."
+          - "No server log errors or secret-shaped values appear."
+        telemetry:
+          - "Author publication event is queryable with safe publication context."
+assertions:
+  uiAppearance:
+    - "Author workspace, upload form, progress state, publication list, and preview pages fit desktop and wallet browser layouts."
+    - "File processing state does not look frozen during conversion."
+  audienceIntuition:
+    - "An author can understand what to upload, what happens next, and whether the work is live or awaiting review."
+    - "Wallet auth language is understandable and separate from payment language."
+  customerTrust:
+    - "The author receives clear confirmation after upload/submission."
+    - "The app does not imply earnings or publication before the server state supports it."
+  flowSuccess:
+    - "The submitted publication is associated with the author identity and has rendered preview pages."
+    - "Publication status, preview access, and telemetry agree."
+  telemetryObservability:
+    - "author.publication_submitted or author.publication_published is visible with source papertrade and safe context."
+    - "Upload/conversion failures are visible in UI and logs without secret leakage."
+  reliabilityRepeatability:
+    - "The same public-safe fixture can be reused with a unique run id."
+    - "Cleanup/unpublish path is documented if production state remains."
+  performance:
+    - "Author workspace first meaningful content <= 3s."
+    - "Wallet auth approval to workspace <= 10s."
+    - "Fixture processing completes <= 90s or is marked warn with server timing evidence."
+evidence:
+  publicSafe:
+    - "Run record in docs/proofrun/runs/."
+    - "Screenshots of author workspace, upload progress, submission confirmation, and preview page."
+    - "Sanitized publication id/title/status."
+  privateArtifacts:
+    - "network-ops/artifacts/proofrun/p2ppsr/PaperTrade/<timestamp>-author-submission-preview/"
+telemetry:
+  expectedEvents:
+    - name: page.view
+      required: true
+    - name: wallet.prompt_shown
+      required: true
+    - name: wallet.action_succeeded
+      required: true
+    - name: author.publication_submitted
+      required: false
+    - name: author.publication_published
+      required: false
+  acceptanceRule: "At least one author.publication_submitted or author.publication_published event is required, depending on current server mode."
+  queryInstructions: "Query UserCom for source=papertrade, surface=author, and the ProofRun title/run id. Cross-check production logs for upload/rendering errors. Do not print author wallet secrets or raw auth payloads."
+performanceThresholds:
+  firstMeaningfulContentMs: 3000
+  uiFeedbackAfterActionMs: 500
+  walletPromptShownMs: 5000
+  approvalToConfirmationMs: 10000
+  fullFlowMs: 120000
+  telemetryVisibleMs: 60000
+recording:
+  runRecordTemplate: /Users/tyeverett/projects/network-ops/docs/runbooks/proofrun-run-record-template.md
+  productRunPath: docs/proofrun/runs/<YYYYMMDDTHHMMSSZ>-papertrade-author-submission-preview.md
+  updateDossier: true
+  updateReadinessRegistry: true

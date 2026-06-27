@@ -1,0 +1,163 @@
+proofrunVersion: 1
+id: papertrade-feedback-usercom-signals
+name: PaperTrade feedback and UserCom signal capture
+surface:
+  repo: p2ppsr/PaperTrade
+  workspace: /Users/tyeverett/projects/PaperTrade
+  dossier: /Users/tyeverett/projects/network-ops/docs/repos/p2ppsr/PaperTrade.md
+  category: feedback
+  audience: "A reader, author, or evaluator who needs to send feedback or support context from a real PaperTrade surface."
+environment:
+  kind: production
+  baseUrl: https://papertrade.metanet.app
+  healthEndpoints:
+    - https://papertrade.metanet.app/healthz
+    - https://usercom.babbage.systems/signal
+    - https://usercom.babbage.systems/submit
+  deployment:
+    system: github-actions
+    workflow: Deploy Production Local Kubernetes
+    namespace: papertrade-prod
+    workload: deployment/papertrade
+    releaseSource: "Capture current commit, workflow run, image tag, image digest, and pod name during preflight."
+safety:
+  stateChanging: true
+  spendCap:
+    amount: 0
+    unit: sats
+  testIdentities:
+    - purpose: operator
+      source: "Use an approved ProofRun contact name/email/message. Do not submit real customer personal data."
+  cleanup:
+    required: false
+    instructions: "Feedback submissions may remain in UserCom as production test records. Prefix message with ProofRun run id and avoid sensitive content."
+matrix:
+  desktopBrowsers:
+    - chrome
+    - safari
+  mobileBrowsers:
+    - ios-safari
+    - android-chrome
+  mobileSimulators:
+    - android-emulator
+  desktopWallets: []
+  mobileWallets: []
+  serverWallets: []
+  networks:
+    - mainnet
+preflight:
+  commands:
+    - description: Check production health
+      command: curl -fsS https://papertrade.metanet.app/healthz
+      cwd: /Users/tyeverett/projects/PaperTrade
+    - description: Check public pages used for feedback
+      command: "curl -fsS https://papertrade.metanet.app/ >/dev/null && curl -fsS https://papertrade.metanet.app/help >/dev/null"
+      cwd: /Users/tyeverett/projects/PaperTrade
+    - description: Capture production rollout state
+      command: /Users/tyeverett/projects/network-ops/scripts/ops/kubectl.sh -n papertrade-prod get deploy papertrade -o wide
+      cwd: /Users/tyeverett/projects/network-ops
+  requiredState:
+    - "The operator has a public-safe ProofRun feedback name, email, and message."
+    - "The feedback message includes a unique run id for UserCom correlation."
+    - "The operator has a UserCom query path to confirm feedback.submitted and adjacent page.view or feedback.opened events."
+flow:
+  steps:
+    - id: open-feedback-from-newsstand
+      actor: target-user
+      action: "Open the newsstand and open the feedback UI from the primary feedback affordance."
+      expected:
+        ui:
+          - "Feedback is discoverable without knowing internal routes."
+          - "The modal or panel is visually stable on desktop and mobile."
+          - "The user can close it without losing page context."
+        telemetry:
+          - "feedback.opened is emitted with surface newsstand or equivalent context."
+      timing:
+        thresholdMs: 2000
+    - id: submit-valid-feedback
+      actor: target-user
+      action: "Submit a public-safe ProofRun feedback message with the unique run id."
+      expected:
+        ui:
+          - "The submit button shows immediate progress or disables safely."
+          - "A clear success confirmation appears."
+          - "The form does not duplicate-submit on repeated clicks."
+        telemetry:
+          - "feedback.submitted is emitted and UserCom /submit returns success."
+        domain:
+          - "The UserCom feedback record contains source papertrade, surface, URL/path, tags, and sanitized context."
+      timing:
+        thresholdMs: 5000
+    - id: submit-invalid-feedback
+      actor: target-user
+      action: "Attempt an invalid submission, such as empty feedback or invalid email, without sending sensitive data."
+      expected:
+        ui:
+          - "The user gets actionable validation feedback."
+          - "The failure does not clear useful entered data unexpectedly."
+        telemetry:
+          - "feedback.failed is emitted only if the app attempts and receives a failure; client-only validation may record no backend submission."
+      timing:
+        thresholdMs: 3000
+    - id: feedback-from-contextual-surfaces
+      actor: target-user
+      action: "Open feedback from Help and from a reader or wallet-help/failure context when available."
+      expected:
+        ui:
+          - "Feedback remains discoverable when the user is confused or blocked."
+          - "Surface-specific context is attached without exposing private wallet material."
+        telemetry:
+          - "feedback.opened and feedback.submitted include useful surface tags such as help, reader, or author-payout."
+assertions:
+  uiAppearance:
+    - "Feedback UI fits desktop and mobile without clipped text, hidden fields, or inaccessible close/submit buttons."
+    - "Success and failure states are visually distinct."
+  audienceIntuition:
+    - "A user can find feedback from likely confusion points."
+    - "Field labels and validation messages are plain language."
+  customerTrust:
+    - "The app confirms receipt and does not silently swallow feedback."
+    - "The user is not asked for wallet approval to send ordinary feedback."
+  flowSuccess:
+    - "A valid feedback submission reaches UserCom and is queryable by run id."
+    - "Invalid submission does not create a misleading success state."
+  telemetryObservability:
+    - "feedback.opened, feedback.submitted, and feedback.failed where applicable are visible with source papertrade."
+    - "Context includes route, surface, release/session context, and no secret-shaped values."
+  reliabilityRepeatability:
+    - "The valid submission can be repeated with a unique run id."
+    - "The form prevents accidental duplicate submissions in a single attempt."
+  performance:
+    - "Feedback UI opens <= 2s."
+    - "Submission confirmation appears <= 5s."
+    - "UserCom visibility <= 60s."
+evidence:
+  publicSafe:
+    - "Run record in docs/proofrun/runs/."
+    - "Screenshots of feedback open, valid success, and invalid validation state."
+    - "Sanitized UserCom event/feedback ids or timestamps."
+  privateArtifacts:
+    - "network-ops/artifacts/proofrun/p2ppsr/PaperTrade/<timestamp>-feedback-usercom-signals/"
+telemetry:
+  expectedEvents:
+    - name: page.view
+      required: true
+    - name: feedback.opened
+      required: true
+    - name: feedback.submitted
+      required: true
+    - name: feedback.failed
+      required: false
+  queryInstructions: "Query UserCom by run id in the feedback text and source=papertrade. Confirm event tags include intent:papertrade-feedback and the observed surface. Do not print unrelated customer feedback."
+performanceThresholds:
+  firstMeaningfulContentMs: 2000
+  uiFeedbackAfterActionMs: 500
+  walletPromptShownMs: 0
+  approvalToConfirmationMs: 0
+  fullFlowMs: 30000
+  telemetryVisibleMs: 60000
+recording:
+  runRecordTemplate: /Users/tyeverett/projects/network-ops/docs/runbooks/proofrun-run-record-template.md
+  productRunPath: docs/proofrun/runs/<YYYYMMDDTHHMMSSZ>-papertrade-feedback-usercom-signals.md
+  updateDossier: true
+  updateReadinessRegistry: true

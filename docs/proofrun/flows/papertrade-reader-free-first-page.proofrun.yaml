@@ -1,0 +1,173 @@
+proofrunVersion: 1
+id: papertrade-reader-free-first-page
+name: PaperTrade reader discovery to first free page
+surface:
+  repo: p2ppsr/PaperTrade
+  workspace: /Users/tyeverett/projects/PaperTrade
+  dossier: /Users/tyeverett/projects/network-ops/docs/repos/p2ppsr/PaperTrade.md
+  category: discover
+  audience: "A new reader who is curious about PaperTrade but may not yet understand BSV, wallets, or pay-per-page publishing."
+environment:
+  kind: production
+  baseUrl: https://papertrade.metanet.app
+  healthEndpoints:
+    - https://papertrade.metanet.app/healthz
+    - https://papertrade.metanet.app/api/status
+    - https://papertrade.metanet.app/api/publications
+  deployment:
+    system: github-actions
+    workflow: Deploy Production Local Kubernetes
+    namespace: papertrade-prod
+    workload: deployment/papertrade
+    releaseSource: "Capture current commit, workflow run, image tag, image digest, and pod name during preflight."
+safety:
+  stateChanging: false
+  spendCap:
+    amount: 0
+    unit: sats
+  testIdentities: []
+  cleanup:
+    required: false
+    instructions: "This flow must not create reader entitlements, feedback, publications, payouts, or admin changes."
+matrix:
+  desktopBrowsers:
+    - chrome
+    - safari
+  mobileBrowsers:
+    - ios-safari
+    - android-chrome
+  mobileSimulators:
+    - ios-simulator
+    - android-emulator
+  desktopWallets: []
+  mobileWallets: []
+  serverWallets: []
+  networks:
+    - mainnet
+preflight:
+  commands:
+    - description: Check PaperTrade worktree
+      command: git status --short --branch
+      cwd: /Users/tyeverett/projects/PaperTrade
+    - description: Check production health
+      command: curl -fsS https://papertrade.metanet.app/healthz
+      cwd: /Users/tyeverett/projects/PaperTrade
+    - description: Check public status
+      command: curl -fsS https://papertrade.metanet.app/api/status
+      cwd: /Users/tyeverett/projects/PaperTrade
+    - description: Check public catalog
+      command: curl -fsS https://papertrade.metanet.app/api/publications
+      cwd: /Users/tyeverett/projects/PaperTrade
+    - description: Capture production rollout state
+      command: /Users/tyeverett/projects/network-ops/scripts/ops/kubectl.sh -n papertrade-prod get deploy papertrade -o wide
+      cwd: /Users/tyeverett/projects/network-ops
+  requiredState:
+    - "Production health returns ok:true."
+    - "The public catalog returns at least one published publication."
+    - "The first publication has a stable id, title, authorName, pageCount, and cover or fallback cover state."
+    - "No wallet or paid action is required for this flow."
+flow:
+  steps:
+    - id: open-newsstand
+      actor: target-reader
+      action: "Open https://papertrade.metanet.app/ in a clean browser context."
+      expected:
+        ui:
+          - "The page title or H1 clearly identifies PaperTrade."
+          - "The first viewport explains the reading value before wallet mechanics."
+          - "Navigation includes Newsstand, Help, Author, and Admin without crowding or clipping."
+          - "The publication grid renders real works, not empty demo placeholders."
+        telemetry:
+          - "page.view is emitted with source papertrade and surface newsstand or equivalent route context."
+          - "newsstand.loaded is emitted after publications render."
+      timing:
+        thresholdMs: 2000
+    - id: inspect-catalog
+      actor: target-reader
+      action: "Scan the first screen and at least the first three publication cards."
+      expected:
+        ui:
+          - "Each visible card has a readable title, human author name, short description or metadata, price/page context, page count, and a visible action to read."
+          - "Cards are tappable/clickable without text overlap at desktop and mobile widths."
+          - "Search or browse controls do not obscure content or resize the layout unexpectedly."
+        domain:
+          - "Rendered publication cards agree with /api/publications for title, id, author, page count, and published status."
+    - id: open-publication-detail
+      actor: target-reader
+      action: "Open the detail page for the first catalog publication."
+      expected:
+        ui:
+          - "The detail page makes the work, author, page count, and start-reading action obvious."
+          - "The user can understand that page 1 is free before any paid page is requested."
+        telemetry:
+          - "publication.viewed is emitted with publicationId and safe route context."
+      timing:
+        thresholdMs: 2000
+    - id: read-page-one-free
+      actor: target-reader
+      action: "Open page 1 from the publication detail page."
+      expected:
+        ui:
+          - "Page 1 renders as a readable page image."
+          - "The reader has obvious navigation to continue, return, or get help."
+          - "No wallet setup prompt appears before page 1 content."
+        domain:
+          - "Direct HTTP for /api/publications/<id>/pages/1 returns a PNG response with X-PaperTrade-Page-Access: free."
+        telemetry:
+          - "reader.first_page_loaded is emitted with publicationId and pageNumber 1."
+      timing:
+        thresholdMs: 3000
+assertions:
+  uiAppearance:
+    - "Desktop 1440x900, tablet 768x1024, and mobile 390x844 viewports have no horizontal overflow, overlapping text, hidden primary actions, or clipped navigation."
+    - "Publication cards, detail hero, and reader page image use stable dimensions and do not shift after load."
+    - "Loading and empty states are coherent if network throttling is used."
+  audienceIntuition:
+    - "A non-technical reader can tell what PaperTrade is, what to click first, and that page 1 is free."
+    - "Wallet or BSV terminology is not required to understand the first action."
+  customerTrust:
+    - "The app does not ask for wallet approval before delivering the promised free page."
+    - "Pricing and page-by-page continuation are visible before any paid action."
+  flowSuccess:
+    - "Homepage, catalog API, publication detail, and page 1 all agree on the selected publication."
+    - "Page 1 can be loaded from click navigation and by direct deep link."
+  telemetryObservability:
+    - "page.view, newsstand.loaded, publication.viewed, and reader.first_page_loaded are queryable in UserCom or the configured signal sink."
+    - "Events include source papertrade, safe route context, release context when available, and no private wallet material."
+  reliabilityRepeatability:
+    - "The flow passes from a clean browser context and after reload/back/forward."
+    - "Running the flow twice creates no duplicate domain state because it is read-only."
+  performance:
+    - "Homepage first meaningful content <= 2s on normal network."
+    - "Publication detail first meaningful content <= 2s on normal network."
+    - "Page 1 image visible <= 3s on normal network."
+evidence:
+  publicSafe:
+    - "Run record in docs/proofrun/runs/."
+    - "Screenshots for homepage, publication detail, and page 1 with no personal data."
+    - "Sanitized curl output for health, status, publications, and page 1 headers."
+  privateArtifacts:
+    - "network-ops/artifacts/proofrun/p2ppsr/PaperTrade/<timestamp>-reader-free-first-page/"
+telemetry:
+  expectedEvents:
+    - name: page.view
+      required: true
+    - name: newsstand.loaded
+      required: true
+    - name: publication.viewed
+      required: true
+    - name: reader.first_page_loaded
+      required: true
+  queryInstructions: "Query UserCom for source=papertrade and the run timestamp/session. Confirm route, surface, publicationId, pageNumber, walletSubstrate, and release context are present where applicable. Do not print cookies, session tokens, or raw request headers."
+performanceThresholds:
+  firstMeaningfulContentMs: 2000
+  uiFeedbackAfterActionMs: 500
+  walletPromptShownMs: 0
+  approvalToConfirmationMs: 0
+  fullFlowMs: 20000
+  telemetryVisibleMs: 60000
+recording:
+  runRecordTemplate: /Users/tyeverett/projects/network-ops/docs/runbooks/proofrun-run-record-template.md
+  productRunPath: docs/proofrun/runs/<YYYYMMDDTHHMMSSZ>-papertrade-reader-free-first-page.md
+  updateDossier: true
+  updateReadinessRegistry: true
