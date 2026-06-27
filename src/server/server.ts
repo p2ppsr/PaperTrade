@@ -34,6 +34,8 @@ const LEGACY_DEFAULT_TAGLINE = 'Read page 1 free. Pay per page after that with a
 const DEFAULT_READER_TAGLINE = 'Start reading free. Continue page by page when you are ready.'
 const LEGACY_DEFAULT_META_DESCRIPTION = 'PaperTrade is a BSV newsstand where readers preview page 1 free and pay per page for independent writing with a BRC100 wallet.'
 const DEFAULT_META_DESCRIPTION = 'PaperTrade is a reader-first BSV newsstand for independent writing, with free first-page previews and page-by-page access.'
+const USERCOM_SIGNAL_ENDPOINT = process.env.USERCOM_SIGNAL_ENDPOINT ?? 'https://usercom.babbage.systems/signal'
+const USERCOM_SOURCE = 'papertrade'
 
 interface AuthenticatedRequest extends Request {
   auth?: { identityKey: string }
@@ -208,6 +210,43 @@ function sanitizeTelemetryContext (value: unknown, depth = 0): unknown {
     return safe
   }
   return String(value).slice(0, 200)
+}
+
+function signalTagValue (value: string): string {
+  return value.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '').slice(0, 64)
+}
+
+function emitUsercomSignal (
+  req: Request | undefined,
+  name: string,
+  surface: string,
+  tags: string[] = [],
+  context: Record<string, unknown> = {}
+): void {
+  const safeContext = sanitizeTelemetryContext({
+    ...context,
+    origin: 'server',
+    requestId: req == null ? undefined : (req as AuthenticatedRequest).requestId,
+    identityKey: req == null ? undefined : identityKeyOf(req),
+    userAgent: req?.get('user-agent')
+  })
+  const payload = {
+    source: USERCOM_SOURCE,
+    name,
+    surface,
+    url: req == null ? undefined : `${req.protocol}://${req.get('host') ?? 'papertrade.metanet.app'}${req.originalUrl}`,
+    path: req?.originalUrl,
+    referrer: req?.get('referer'),
+    tags: Array.from(new Set([`surface:${signalTagValue(surface)}`, 'origin:server', ...tags])),
+    context: typeof safeContext === 'object' && safeContext != null && !Array.isArray(safeContext) ? safeContext : {}
+  }
+  void fetch(USERCOM_SIGNAL_ENDPOINT, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(payload)
+  }).catch(err => {
+    console.warn('[usercom signal failed]', name, err instanceof Error ? err.message : err)
+  })
 }
 
 async function recordClientTelemetry (req: Request, event: ClientTelemetryEvent): Promise<string> {
@@ -547,6 +586,15 @@ async function sendPublicationPageImage (
         }
       ])
       await writeAudit('page_paid', readerIdentityKey, 'publication', publication.id, { pageNumber, satsPaid }, trx)
+    })
+    emitUsercomSignal(req, 'reader.paid_page_unlocked', 'reader', ['page:paid', 'conversion:paid_page'], {
+      publicationId: publication.id,
+      pageNumber,
+      amountSats: satsPaid,
+      authorSats,
+      commissionSats,
+      paymentId,
+      publicationTitle: String(publication.title)
     })
   }
 
@@ -1503,6 +1551,10 @@ async function createApp (): Promise<express.Express> {
       updated_at: db.fn.now()
     })
     await writeAudit(nextStatus === 'published' ? 'publication_published' : 'publication_submitted', identityKey, 'publication', req.params.id)
+    emitUsercomSignal(req, nextStatus === 'published' ? 'author.publication_published' : 'author.publication_submitted', 'author', [`status:${nextStatus}`], {
+      publicationId: req.params.id,
+      status: nextStatus
+    })
     res.json({ status: 'success', statusValue: nextStatus })
   })
 
@@ -1601,6 +1653,9 @@ async function createApp (): Promise<express.Express> {
     }
     await db('publications').where({ id: req.params.id }).update({ status: 'submitted', updated_at: db.fn.now() })
     await writeAudit('publication_submitted', identityKeyOf(req), 'publication', req.params.id)
+    emitUsercomSignal(req, 'admin.publication_submitted', 'admin', ['status:submitted'], {
+      publicationId: req.params.id
+    })
     res.json({ status: 'success' })
   })
 
@@ -1614,6 +1669,9 @@ async function createApp (): Promise<express.Express> {
     }
     if (action === 'reject') {
       await deletePublication(publication.id, identityKeyOf(req))
+      emitUsercomSignal(req, 'admin.publication_rejected', 'admin', ['status:rejected'], {
+        publicationId: publication.id
+      })
       res.json({ status: 'success', deleted: true })
       return
     }
@@ -1626,6 +1684,9 @@ async function createApp (): Promise<express.Express> {
         updated_at: db.fn.now()
       })
       await writeAudit('publication_unpublished', identityKeyOf(req), 'publication', req.params.id, { note: req.body.note })
+      emitUsercomSignal(req, 'admin.publication_unpublished', 'admin', ['status:draft'], {
+        publicationId: req.params.id
+      })
       res.json({ status: 'success' })
       return
     }
@@ -1638,6 +1699,9 @@ async function createApp (): Promise<express.Express> {
         updated_at: db.fn.now()
       })
       await writeAudit('publication_returned_to_review', identityKeyOf(req), 'publication', req.params.id, { note: req.body.note })
+      emitUsercomSignal(req, 'admin.publication_returned_to_review', 'admin', ['status:submitted'], {
+        publicationId: req.params.id
+      })
       res.json({ status: 'success' })
       return
     }
@@ -1653,6 +1717,9 @@ async function createApp (): Promise<express.Express> {
       updated_at: db.fn.now()
     })
     await writeAudit('publication_published', identityKeyOf(req), 'publication', req.params.id, { note: req.body.note })
+    emitUsercomSignal(req, 'admin.publication_published', 'admin', ['status:published'], {
+      publicationId: req.params.id
+    })
     res.json({ status: 'success' })
   })
 
@@ -1871,6 +1938,15 @@ async function createApp (): Promise<express.Express> {
         })
       }
       await writeAudit('payout_created', identityKeyOf(req), 'payout', payoutId, { status, destinationType }, trx)
+    })
+    emitUsercomSignal(req, status === 'failed' ? 'payout.failed' : status === 'broadcast' ? 'payout.succeeded' : 'payout.created', 'admin', [`status:${status}`, `destination:${destinationType}`], {
+      payoutId,
+      authorIdentityKey,
+      amountSats,
+      destinationType,
+      status,
+      hasTxid: txid != null,
+      failureReason
     })
 
     res.json({ status: 'success', payoutId, payoutStatus: status, txid, failureReason })

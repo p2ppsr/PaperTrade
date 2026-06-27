@@ -5,6 +5,16 @@ import { AuthFetch, Utils, WalletClient } from '@bsv/sdk'
 import { IdentityCard } from '@bsv/identity-react'
 import { Activity, BookOpen, Check, ExternalLink, FileText, Github, HelpCircle, Home, Image, Info, Library, MessageCircle, Monitor, Palette, RefreshCw, Search, Settings, Share2, Smartphone, Upload, User, X } from 'lucide-react'
 import './styles.css'
+import {
+  buildUsercomFeedback,
+  buildUsercomSignal,
+  cleanUsercomContext,
+  signalSeverity,
+  type UsercomRuntime,
+  type UsercomSignalPayload,
+  USERCOM_SIGNAL_ENDPOINT,
+  USERCOM_SUBMIT_ENDPOINT
+} from './usercom'
 
 type WalletSubstrate = 'auto' | 'json-api' | 'secure-json-api' | 'react-native' | 'Cicada' | 'XDM' | 'window.CWI'
 
@@ -125,9 +135,6 @@ const API = '/api'
 const WALLET_ORIGINATOR = (import.meta as any).env?.VITE_WALLET_ORIGINATOR ?? window.location.hostname
 const WALLET_SUBSTRATE_OVERRIDE = (import.meta as any).env?.VITE_WALLET_SUBSTRATE as string | undefined
 const APP_RELEASE = (import.meta as any).env?.VITE_APP_VERSION ?? 'browser'
-const USERCOM_SOURCE = 'papertrade'
-const USERCOM_SUBMIT_ENDPOINT = 'https://usercom.babbage.systems/submit'
-const USERCOM_SIGNAL_ENDPOINT = 'https://usercom.babbage.systems/signal'
 const TELEMETRY_ENDPOINT = `${API}/telemetry`
 const GET_METANET_DOWNLOADS_URL = 'https://getmetanet.com/downloads'
 const METANET_EXPLORER_IOS_URL = 'https://apps.apple.com/us/app/metanet-explorer/id6752445658'
@@ -403,6 +410,11 @@ async function authFetch (url: string, init?: RequestInit, action = 'complete th
     activeWalletRequestContext = { method, url: new URL(requestUrl).pathname, action }
     try {
       const fetcher = getAuthFetch()
+      postSignal('wallet.prompt_shown', {
+        surface: 'wallet',
+        tags: [`action:${tagValue(action)}`, `method:${method.toLowerCase()}`],
+        context: { action, method, path: new URL(requestUrl).pathname }
+      })
       const response = await fetcher.fetch(requestUrl, init as any)
       postTelemetry(response.ok ? 'wallet.request_finished' : 'wallet.request_http_error', response.ok ? 'info' : 'warn', {
         durationMs: performance.now() - startedAt,
@@ -411,6 +423,18 @@ async function authFetch (url: string, init?: RequestInit, action = 'complete th
           method,
           url: new URL(requestUrl).pathname,
           status: response.status
+        }
+      })
+      postSignal(response.ok ? 'wallet.action_succeeded' : 'wallet.action_failed', {
+        surface: 'wallet',
+        tags: [`action:${tagValue(action)}`, `method:${method.toLowerCase()}`, response.ok ? 'status:success' : 'status:http_error'],
+        context: {
+          action,
+          method,
+          path: new URL(requestUrl).pathname,
+          status: response.status,
+          durationMs: Math.round(performance.now() - startedAt),
+          requestId: response.headers.get('x-papertrade-request-id')
         }
       })
       return response
@@ -433,6 +457,17 @@ async function authFetch (url: string, init?: RequestInit, action = 'complete th
           method,
           url: new URL(requestUrl).pathname,
           message: normalized.message
+        }
+      })
+      postSignal('wallet.action_failed', {
+        surface: 'wallet',
+        tags: [`action:${tagValue(action)}`, `method:${method.toLowerCase()}`, 'status:failed'],
+        context: {
+          action,
+          method,
+          path: new URL(requestUrl).pathname,
+          message: normalized.message,
+          durationMs: Math.round(performance.now() - startedAt)
         }
       })
       throw normalized
@@ -597,7 +632,7 @@ function tagValue (value: string): string {
 }
 
 function cleanContext (context: Record<string, unknown>): Record<string, unknown> {
-  return Object.fromEntries(Object.entries(context).filter(([, value]) => value !== undefined && value !== null && value !== ''))
+  return cleanUsercomContext(context)
 }
 
 function connectionType (): string | undefined {
@@ -668,38 +703,48 @@ function normalizeWalletTransportError (err: unknown): Error {
   return new Error('BRC100 wallet setup is needed to continue. Open PaperTrade in Metanet Explorer, BSV Browser, or another compatible BRC100 wallet browser.')
 }
 
-function usercomMetadata ({ surface, tags = [], context = {} }: { surface: string, tags?: string[], context?: Record<string, unknown> }): Record<string, unknown> {
+function usercomRuntime (): UsercomRuntime {
+  const currentSessionId = sessionId()
   return {
-    source: USERCOM_SOURCE,
-    surface,
     url: window.location.href,
     path: `${window.location.pathname}${window.location.search}`,
     referrer: document.referrer === '' ? undefined : document.referrer,
     anonymousId: anonymousId(),
-    sessionId: sessionId(),
-    tags: [`surface:${tagValue(surface)}`, ...tags].filter(Boolean),
-    context: cleanContext(context)
+    sessionId: currentSessionId,
+    userAgent: window.navigator.userAgent,
+    releaseVersion: APP_RELEASE,
+    walletSubstrate: getWalletSubstrate(),
+    diagnosticId: currentSessionId
   }
 }
 
-function postSignal (name: string, metadata: Record<string, unknown>): void {
+function usercomMetadata ({ name = 'event', surface, tags = [], context = {} }: { name?: string, surface: string, tags?: string[], context?: Record<string, unknown> }): UsercomSignalPayload {
+  return buildUsercomSignal({ name, surface, tags, context }, usercomRuntime())
+}
+
+function postSignal (name: string, input: UsercomSignalPayload | { surface: string, tags?: string[], context?: Record<string, unknown> }): void {
   try {
-    const tags = Array.isArray(metadata.tags) ? metadata.tags.map(String) : []
-    const severity = tags.includes('error') || tags.includes('wallet_failed') ? 'error' : tags.some(tag => tag.includes('failed')) ? 'warn' : 'info'
+    const metadata = 'source' in input ? { ...input, name } : usercomMetadata({ name, surface: input.surface, tags: input.tags, context: input.context })
+    const tags = metadata.tags.map(String)
+    const severity = signalSeverity(tags)
     postTelemetry(name, severity, {
       context: {
         surface: metadata.surface,
         tags,
-        ...(typeof metadata.context === 'object' && metadata.context != null ? metadata.context as Record<string, unknown> : {})
+        ...(typeof metadata.context === 'object' && metadata.context != null ? metadata.context : {})
       }
     })
     void fetch(USERCOM_SIGNAL_ENDPOINT, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ name, ...metadata }),
+      body: JSON.stringify({ ...metadata, name }),
       keepalive: true
     }).catch(() => undefined)
   } catch {}
+}
+
+function feedbackPayload (input: { surface: string, name?: string, email?: string, feedback: string, tags?: string[], context?: Record<string, unknown> }): Record<string, unknown> {
+  return buildUsercomFeedback(input, usercomRuntime())
 }
 
 function friendlyErrorMessage (err: unknown, fallback: string): string {
@@ -877,23 +922,33 @@ function FeedbackPanel ({ surface, onClose }: { surface: string, onClose?: () =>
       setMessage('Tell us what happened before sending feedback.')
       return
     }
-    const metadata = usercomMetadata({ surface, tags: ['feedback'], context: { surface } })
-    const res = await fetch(USERCOM_SUBMIT_ENDPOINT, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({
-        type: 'feedback',
-        name: form.name.trim() === '' ? undefined : form.name.trim(),
-        email: form.email.trim() === '' ? undefined : form.email.trim(),
-        subject: `PaperTrade feedback: ${surface}`,
+    try {
+      const payload = feedbackPayload({
+        surface,
+        name: form.name,
+        email: form.email,
         feedback,
-        ...metadata
+        tags: ['feedback'],
+        context: { surface }
       })
-    })
-    if (!res.ok) throw new Error('Feedback could not be sent')
-    postSignal('feedback.submitted', metadata)
-    setForm({ name: '', email: '', feedback: '' })
-    setMessage('Feedback sent.')
+      const res = await fetch(USERCOM_SUBMIT_ENDPOINT, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify(payload)
+      })
+      if (!res.ok) throw new Error('Feedback could not be sent')
+      postSignal('feedback.submitted', payload as unknown as UsercomSignalPayload)
+      setForm({ name: '', email: '', feedback: '' })
+      setMessage('Feedback sent.')
+    } catch (err) {
+      const errorMessage = err instanceof Error ? err.message : 'Feedback could not be sent'
+      postSignal('feedback.failed', {
+        surface: 'feedback',
+        tags: ['feedback', 'status:failed'],
+        context: { feedbackSurface: surface, message: errorMessage }
+      })
+      setMessage(errorMessage)
+    }
   }
   return (
     <section className='feedback-panel'>
@@ -905,7 +960,7 @@ function FeedbackPanel ({ surface, onClose }: { surface: string, onClose?: () =>
           </button>
         )}
       </div>
-      <form onSubmit={e => { e.preventDefault(); void submit().catch(err => setMessage(err instanceof Error ? err.message : 'Feedback could not be sent')) }}>
+      <form onSubmit={e => { e.preventDefault(); void submit() }}>
         <div className='feedback-grid'>
           <label>Name <input value={form.name} onChange={e => setForm({ ...form, name: e.target.value })} /></label>
           <label>Email <input type='email' value={form.email} onChange={e => setForm({ ...form, email: e.target.value })} /></label>
@@ -1087,7 +1142,18 @@ function Shell ({ children, status }: { children: React.ReactNode, status: Statu
           <Link to='/author'><User size={18} /> Author</Link>
           <Link to='/admin'><Settings size={18} /> Admin</Link>
         </nav>
-        <button className='nav-feedback' type='button' onClick={() => setFeedbackOpen(true)}>
+        <button
+          className='nav-feedback'
+          type='button'
+          onClick={() => {
+            postSignal('feedback.opened', {
+              surface: 'feedback',
+              tags: ['feedback'],
+              context: { feedbackSurface }
+            })
+            setFeedbackOpen(true)
+          }}
+        >
           <MessageCircle size={18} /> Feedback
         </button>
         {showStatusLine && (
@@ -1117,11 +1183,11 @@ function Newsstand ({ status }: { status: Status | null }): JSX.Element {
       if (!res.ok) throw new Error(json.message ?? 'Could not load publications')
       const rows = json.publications ?? []
       setPublications(rows)
-      postSignal('newsstand.loaded', usercomMetadata({ surface: 'newsstand', tags: ['reader'], context: { publicationCount: rows.length, durationMs: Math.round(performance.now() - startedAt) } }))
+      postSignal('newsstand.loaded', usercomMetadata({ name: 'newsstand.loaded', surface: 'newsstand', tags: ['reader'], context: { publicationCount: rows.length, durationMs: Math.round(performance.now() - startedAt) } }))
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Could not load publications'
       setLoadMessage(message)
-      postSignal('newsstand.failed', usercomMetadata({ surface: 'newsstand', tags: ['error'], context: { message, durationMs: Math.round(performance.now() - startedAt) } }))
+      postSignal('newsstand.failed', usercomMetadata({ name: 'newsstand.failed', surface: 'newsstand', tags: ['error'], context: { message, durationMs: Math.round(performance.now() - startedAt) } }))
     }
   }
   useEffect(() => {
@@ -1190,7 +1256,7 @@ function PublicationDetail ({ status }: { status: Status | null }): JSX.Element 
       setPublication(loaded)
       if (loaded != null) {
         setClientMeta(`${loaded.title} | PaperTrade`, loaded.description ?? 'Read this publication on PaperTrade.')
-        postSignal('publication.view', usercomMetadata({ surface: 'publication', tags: ['reader'], context: { publicationId: id, pageCount: loaded.pageCount } }))
+        postSignal('publication.view', usercomMetadata({ name: 'publication.view', surface: 'publication', tags: ['reader'], context: { publicationId: id, pageCount: loaded.pageCount } }))
       }
     })
   }, [id])
@@ -1242,7 +1308,9 @@ function Reader ({ status }: { status: Status | null }): JSX.Element {
       setImageUrl(image.src)
       setMessage('')
       setIsLoading(false)
-      postSignal('reader.page_loaded', usercomMetadata({
+      const eventName = currentPage === 1 ? 'reader.first_page_loaded' : 'reader.paid_page_unlocked'
+      postSignal(eventName, usercomMetadata({
+        name: eventName,
         surface: 'reader',
         tags: [currentPage === 1 ? 'page:first_free' : 'page:paid', cacheHit ? 'cache:hit' : 'cache:miss'],
         context: { publicationId: id, pageNumber: currentPage, cacheHit }
@@ -1260,6 +1328,11 @@ function Reader ({ status }: { status: Status | null }): JSX.Element {
       }
     }
     if (currentPage > 1) {
+      postSignal('reader.paid_page_unlock_started', {
+        surface: 'reader',
+        tags: ['page:paid'],
+        context: { publicationId: id, pageNumber: currentPage }
+      })
       walletWaitTimer = window.setTimeout(() => {
         if (live) setMessage('Unlocking page...')
       }, 3000)
@@ -1281,7 +1354,8 @@ function Reader ({ status }: { status: Status | null }): JSX.Element {
         const nextMessage = friendlyErrorMessage(err, 'Unable to load page')
         setMessage(nextMessage)
         setIsLoading(false)
-        postSignal('reader.page_failed', usercomMetadata({ surface: 'reader', tags: ['error'], context: { publicationId: id, pageNumber: currentPage, message: nextMessage } }))
+        const eventName = currentPage === 1 ? 'reader.first_page_failed' : 'reader.paid_page_failed'
+        postSignal(eventName, usercomMetadata({ name: eventName, surface: 'reader', tags: ['error'], context: { publicationId: id, pageNumber: currentPage, message: nextMessage } }))
       })
     return () => {
       live = false
