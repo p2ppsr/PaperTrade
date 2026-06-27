@@ -41,7 +41,7 @@ jobs:
       SQL_DATABASE_PASSWORD: ${{ secrets.PROD_SQL_DATABASE_PASSWORD }}
       SERVER_PRIVATE_KEY: ${{ secrets.PROD_SERVER_PRIVATE_KEY }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7.0.0
         with:
           fetch-depth: 0
       - name: Select deploy commit
