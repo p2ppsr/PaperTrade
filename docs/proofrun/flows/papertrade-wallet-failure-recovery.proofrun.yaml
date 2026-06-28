@@ -62,6 +62,8 @@ preflight:
   requiredState:
     - "A clean non-wallet browser context is available."
     - "A wallet substrate that can deny/cancel a prompt is available for denial testing, or the branch is marked blocked."
+    - "The wallet permission baseline for papertrade.metanet.app is captured before the denial/timeout branches, including payments/spending, baskets, grouped protocols, PACT permissions, certificate access, and manifest-derived grants that may affect page access."
+    - "For zero-spend branches, existing PaperTrade permissions that could auto-complete paid page access are revoked, or an isolated wallet/profile with no relevant PaperTrade permission is used before opening an unowned paid page."
     - "A controlled timeout or unavailable wallet bridge can be created without approving payment, or the branch is marked blocked."
     - "The selected publication has a paid page 2."
 flow:
@@ -82,13 +84,14 @@ flow:
         thresholdMs: 10000
     - id: deny-wallet-prompt
       actor: target-reader
-      action: "Open page 2 in a supported wallet browser or bridge and deny/cancel the wallet prompt."
+      action: "After recording or resetting the PaperTrade wallet permission baseline, open page 2 in a supported wallet browser or bridge and deny/cancel the wallet prompt."
       expected:
         ui:
           - "The app returns to a clear recoverable failure state."
           - "The user can retry or return to page 1."
           - "The UI does not say the page is unlocked."
         wallet:
+          - "The permission baseline proves no relevant standing PaperTrade payment, basket, protocol, PACT, certificate, or manifest-derived permission could auto-complete the action, or the branch is marked blocked."
           - "The wallet reports denial/cancel without submitting payment."
         telemetry:
           - "wallet.action_failed and reader.paid_page_failed are emitted with safe failure context."
