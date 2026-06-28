@@ -144,8 +144,9 @@ Stored under:
 
 - `01-safari-missing-wallet.png`
 - `02-safari-unowned-page-before-denial.png`
-- `desktop-before-denial.png`
-- `desktop-after-unowned-request.png`
+- Desktop wallet screenshots were captured during triage but intentionally omitted
+  from committed artifacts because they contained unrelated personal notification
+  data.
 - `before-db.tsv`
 - `grimm-page2-before.tsv`
 - `after-unowned-render-db-telemetry.tsv`
