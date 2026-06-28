@@ -603,10 +603,14 @@ async function sendPublicationPageImage (
     res.status(404).json({ status: 'error', message: 'Page image not found' })
     return
   }
+  let pageAccessMode: 'free' | 'paid' | 'owned' | undefined
   if (pageNumber === 1) {
-    res.setHeader('X-PaperTrade-Page-Access', 'free')
+    pageAccessMode = 'free'
   } else if (readerIdentityKey != null && await hasReadablePageAccess(publication.id, pageNumber, readerIdentityKey)) {
-    res.setHeader('X-PaperTrade-Page-Access', satsPaid > 0 ? 'paid' : 'owned')
+    pageAccessMode = satsPaid > 0 ? 'paid' : 'owned'
+  }
+  if (pageAccessMode != null) {
+    res.setHeader('X-PaperTrade-Page-Access', pageAccessMode)
   }
   res.setHeader('Cache-Control', 'private, max-age=60')
   if (req.query.format === 'json' && pageTokenSecret != null && readerIdentityKey != null) {
@@ -621,6 +625,7 @@ async function sendPublicationPageImage (
     res.json({
       status: 'success',
       mimeType: 'image/png',
+      pageAccessMode,
       imageUrl: `${ROUTING_PREFIX}/publications/${String(publication.id)}/pages/${pageNumber}/rendered?token=${encodeURIComponent(token)}`,
       expiresAt
     })

@@ -15,6 +15,12 @@ import {
   USERCOM_SIGNAL_ENDPOINT,
   USERCOM_SUBMIT_ENDPOINT
 } from './usercom'
+import {
+  buildPaidPageAccessStartedTelemetry,
+  buildReaderPageLoadedTelemetry,
+  normalizeReaderPageAccessMode,
+  type ReaderPageAccessMode
+} from './readerTelemetry'
 
 type WalletSubstrate = 'auto' | 'json-api' | 'secure-json-api' | 'react-native' | 'Cicada' | 'XDM' | 'window.CWI'
 
@@ -150,6 +156,7 @@ let cachedAuthFetch: AuthFetch | null = null
 interface ReaderPageImage {
   src: string
   revokeOnEvict: boolean
+  accessMode: ReaderPageAccessMode
 }
 const readerPageImageCache = new Map<string, ReaderPageImage>()
 const READER_PAGE_BLOB_CACHE_LIMIT = 50
@@ -509,7 +516,7 @@ async function withWalletTelemetryContext<T> (context: Record<string, unknown>, 
 }
 
 async function protectedPageFetch (url: string, signal?: AbortSignal): Promise<Response> {
-  return await authFetch(url, signal == null ? undefined : { signal }, 'unlock this page')
+  return await authFetch(url, signal == null ? undefined : { signal }, 'load paid page access')
 }
 
 function withFormatJson (url: string): string {
@@ -570,6 +577,7 @@ async function responseToPageImage (res: Response, fallbackMessage: string, expe
     })
     const mimeType = typeof json.mimeType === 'string' ? json.mimeType : ''
     const dataBase64 = typeof json.dataBase64 === 'string' ? json.dataBase64 : ''
+    const accessMode = normalizeReaderPageAccessMode(json.pageAccessMode ?? json.accessMode)
     if (typeof json.imageUrl === 'string') {
       postTelemetry('reader.page_image_url_fetch_started', 'info', {
         context: { path: new URL(absoluteRequestUrl(json.imageUrl)).pathname }
@@ -579,10 +587,10 @@ async function responseToPageImage (res: Response, fallbackMessage: string, expe
       postTelemetry('reader.page_image_url_fetch_finished', 'info', {
         context: { path: new URL(absoluteRequestUrl(json.imageUrl)).pathname }
       })
-      return image
+      return { ...image, accessMode }
     }
     if (mimeType === 'image/png' && dataBase64 !== '') {
-      return { src: `data:${mimeType};base64,${dataBase64}`, revokeOnEvict: false }
+      return { src: `data:${mimeType};base64,${dataBase64}`, revokeOnEvict: false, accessMode }
     }
     throw new Error(`${fallbackMessage}: server did not return a rendered page image`)
   }
@@ -598,7 +606,11 @@ async function responseToPageImage (res: Response, fallbackMessage: string, expe
     header[6] === 0x1a &&
     header[7] === 0x0a
   if (!isPng) throw new Error(`${fallbackMessage}: server did not return a rendered page image`)
-  return { src: URL.createObjectURL(blob), revokeOnEvict: true }
+  return {
+    src: URL.createObjectURL(blob),
+    revokeOnEvict: true,
+    accessMode: normalizeReaderPageAccessMode(res.headers.get('x-papertrade-page-access'))
+  }
 }
 
 function randomId (): string {
@@ -1308,13 +1320,13 @@ function Reader ({ status }: { status: Status | null }): JSX.Element {
       setImageUrl(image.src)
       setMessage('')
       setIsLoading(false)
-      const eventName = currentPage === 1 ? 'reader.first_page_loaded' : 'reader.paid_page_unlocked'
-      postSignal(eventName, usercomMetadata({
-        name: eventName,
-        surface: 'reader',
-        tags: [currentPage === 1 ? 'page:first_free' : 'page:paid', cacheHit ? 'cache:hit' : 'cache:miss'],
-        context: { publicationId: id, pageNumber: currentPage, cacheHit }
-      }))
+      const event = buildReaderPageLoadedTelemetry({
+        publicationId: id,
+        pageNumber: currentPage,
+        cacheHit,
+        accessMode: image.accessMode
+      })
+      postSignal(event.name, usercomMetadata(event))
     }
     setImageUrl(null)
     setMessage(currentPage > 1 ? 'Unlocking page...' : 'Loading page...')
@@ -1328,11 +1340,8 @@ function Reader ({ status }: { status: Status | null }): JSX.Element {
       }
     }
     if (currentPage > 1) {
-      postSignal('reader.paid_page_unlock_started', {
-        surface: 'reader',
-        tags: ['page:paid'],
-        context: { publicationId: id, pageNumber: currentPage }
-      })
+      const event = buildPaidPageAccessStartedTelemetry(id, currentPage)
+      postSignal(event.name, usercomMetadata(event))
       walletWaitTimer = window.setTimeout(() => {
         if (live) setMessage('Unlocking page...')
       }, 3000)
