@@ -89,7 +89,8 @@ flow:
           - "No spend or payment request is made."
           - "If a prompt appears, it is an auth/access request consistent with rereading owned content."
         telemetry:
-          - "wallet.prompt_shown and wallet.action_succeeded may appear, but no reader.paid_page_unlock_started should be emitted unless the product intentionally uses that event for owned-page access and marks it as not charged."
+          - "reader.paid_page_access_started may appear as a neutral access-check event."
+          - "wallet.prompt_shown and wallet.action_succeeded may appear, but no reader.paid_page_unlock_started should be emitted."
       timing:
         thresholdMs: 10000
     - id: verify-owned-page-renders
@@ -152,11 +153,13 @@ telemetry:
       required: false
     - name: wallet.action_succeeded
       required: false
-    - name: reader.paid_page_unlocked
-      required: false
+    - name: reader.owned_page_accessed
+      required: true
   forbiddenOrWarnEvents:
     - name: reader.paid_page_unlock_started
-      condition: "Warn or fail if emitted as a fresh conversion for an already-owned page without context indicating no new charge."
+      condition: "Warn or fail if emitted for an already-owned page."
+    - name: reader.paid_page_unlocked
+      condition: "Warn or fail if emitted for an already-owned page without a new payment."
     - name: payout.created
       condition: "Fail if reread creates payout or ledger side effects."
   queryInstructions: "Query UserCom and production logs around the run session. Confirm any paid-page event is clearly owned/reread or server-confirmed no-charge. Do not print raw wallet auth material."

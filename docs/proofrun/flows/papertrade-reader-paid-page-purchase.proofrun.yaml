@@ -93,7 +93,7 @@ flow:
           - "The app shows immediate progress and does not appear frozen."
           - "The user sees language that explains this is a wallet/payment request for unlocking the page."
         telemetry:
-          - "reader.paid_page_unlock_started is emitted with publicationId and pageNumber 2."
+          - "reader.paid_page_access_started is emitted with publicationId and pageNumber 2 before the access/payment request completes."
           - "wallet.prompt_shown is emitted when the wallet prompt is expected or displayed."
       timing:
         thresholdMs: 5000
@@ -131,7 +131,7 @@ flow:
         logs:
           - "No unexpected PaperTrade server errors, wallet storage errors, duplicate entitlement errors, or secret-shaped fields appear in logs."
         telemetry:
-          - "The paid conversion sequence is queryable: page.view, reader.first_page_loaded, reader.paid_page_unlock_started, wallet.prompt_shown, wallet.action_succeeded, reader.paid_page_unlocked."
+          - "The paid conversion sequence is queryable: page.view, reader.first_page_loaded, reader.paid_page_access_started, wallet.prompt_shown, wallet.action_succeeded, reader.paid_page_unlocked."
 assertions:
   uiAppearance:
     - "The paid-page path is usable at desktop and in the selected wallet/browser substrate."
@@ -170,7 +170,7 @@ telemetry:
       required: true
     - name: reader.first_page_loaded
       required: true
-    - name: reader.paid_page_unlock_started
+    - name: reader.paid_page_access_started
       required: true
     - name: wallet.prompt_shown
       required: true

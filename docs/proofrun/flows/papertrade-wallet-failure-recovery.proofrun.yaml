@@ -77,7 +77,7 @@ flow:
         domain:
           - "No entitlement, payment, or ledger entry is created."
         telemetry:
-          - "reader.paid_page_unlock_started or wallet attempt telemetry may emit, followed by reader.paid_page_failed and/or wallet.action_failed."
+          - "reader.paid_page_access_started or wallet attempt telemetry may emit, followed by reader.paid_page_failed and/or wallet.action_failed."
       timing:
         thresholdMs: 10000
     - id: deny-wallet-prompt
@@ -149,7 +149,7 @@ telemetry:
   expectedEvents:
     - name: page.view
       required: true
-    - name: reader.paid_page_unlock_started
+    - name: reader.paid_page_access_started
       required: true
     - name: wallet.prompt_shown
       required: false
