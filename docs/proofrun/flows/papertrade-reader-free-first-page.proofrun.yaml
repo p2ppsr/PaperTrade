@@ -100,7 +100,7 @@ flow:
           - "The detail page makes the work, author, page count, and start-reading action obvious."
           - "The user can understand that page 1 is free before any paid page is requested."
         telemetry:
-          - "publication.viewed is emitted with publicationId and safe route context."
+          - "publication.view is emitted with publicationId and safe route context."
       timing:
         thresholdMs: 2000
     - id: read-page-one-free
@@ -132,7 +132,7 @@ assertions:
     - "Homepage, catalog API, publication detail, and page 1 all agree on the selected publication."
     - "Page 1 can be loaded from click navigation and by direct deep link."
   telemetryObservability:
-    - "page.view, newsstand.loaded, publication.viewed, and reader.first_page_loaded are queryable in UserCom or the configured signal sink."
+    - "page.view, newsstand.loaded, publication.view, and reader.first_page_loaded are queryable in UserCom or the configured signal sink."
     - "Events include source papertrade, safe route context, release context when available, and no private wallet material."
   reliabilityRepeatability:
     - "The flow passes from a clean browser context and after reload/back/forward."
@@ -154,7 +154,7 @@ telemetry:
       required: true
     - name: newsstand.loaded
       required: true
-    - name: publication.viewed
+    - name: publication.view
       required: true
     - name: reader.first_page_loaded
       required: true
