@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react'
+import React, { useEffect, useMemo, useRef, useState } from 'react'
 import { createRoot } from 'react-dom/client'
 import { BrowserRouter, Link, Route, Routes, useLocation, useNavigate, useParams } from 'react-router-dom'
 import { AuthFetch, Utils, WalletClient } from '@bsv/sdk'
@@ -928,12 +928,18 @@ function feedbackSurfaceForPath (pathname: string): string {
 function FeedbackPanel ({ surface, onClose }: { surface: string, onClose?: () => void }): JSX.Element {
   const [form, setForm] = useState({ name: '', email: '', feedback: '' })
   const [message, setMessage] = useState('')
+  const [isSubmitting, setIsSubmitting] = useState(false)
+  const submitInFlightRef = useRef(false)
   const submit = async (): Promise<void> => {
+    if (submitInFlightRef.current) return
     const feedback = form.feedback.trim()
     if (feedback === '') {
       setMessage('Tell us what happened before sending feedback.')
       return
     }
+    submitInFlightRef.current = true
+    setIsSubmitting(true)
+    setMessage('')
     try {
       const payload = feedbackPayload({
         surface,
@@ -949,7 +955,13 @@ function FeedbackPanel ({ surface, onClose }: { surface: string, onClose?: () =>
         body: JSON.stringify(payload)
       })
       if (!res.ok) throw new Error('Feedback could not be sent')
-      postSignal('feedback.submitted', payload as unknown as UsercomSignalPayload)
+      postTelemetry('feedback.submitted', 'info', {
+        context: {
+          surface,
+          tags: Array.isArray(payload.tags) ? payload.tags.map(String) : ['feedback'],
+          ...(typeof payload.context === 'object' && payload.context != null ? payload.context : {})
+        }
+      })
       setForm({ name: '', email: '', feedback: '' })
       setMessage('Feedback sent.')
     } catch (err) {
@@ -960,6 +972,9 @@ function FeedbackPanel ({ surface, onClose }: { surface: string, onClose?: () =>
         context: { feedbackSurface: surface, message: errorMessage }
       })
       setMessage(errorMessage)
+    } finally {
+      submitInFlightRef.current = false
+      setIsSubmitting(false)
     }
   }
   return (
@@ -967,21 +982,21 @@ function FeedbackPanel ({ surface, onClose }: { surface: string, onClose?: () =>
       <div className='panel-title-row'>
         <h2><MessageCircle size={18} /> Feedback</h2>
         {onClose != null && (
-          <button className='icon-button' type='button' aria-label='Close feedback' onClick={onClose}>
+          <button className='icon-button' type='button' aria-label='Close feedback' disabled={isSubmitting} onClick={onClose}>
             <X size={18} />
           </button>
         )}
       </div>
-      <form onSubmit={e => { e.preventDefault(); void submit() }}>
+      <form aria-busy={isSubmitting} onSubmit={e => { e.preventDefault(); void submit() }}>
         <div className='feedback-grid'>
-          <label>Name <input value={form.name} onChange={e => setForm({ ...form, name: e.target.value })} /></label>
-          <label>Email <input type='email' value={form.email} onChange={e => setForm({ ...form, email: e.target.value })} /></label>
+          <label>Name <input disabled={isSubmitting} value={form.name} onChange={e => setForm({ ...form, name: e.target.value })} /></label>
+          <label>Email <input disabled={isSubmitting} type='email' value={form.email} onChange={e => setForm({ ...form, email: e.target.value })} /></label>
         </div>
-        <label>Message <textarea value={form.feedback} onChange={e => setForm({ ...form, feedback: e.target.value })} /></label>
-        <button className='button' type='submit'>Send feedback</button>
+        <label>Message <textarea disabled={isSubmitting} value={form.feedback} onChange={e => setForm({ ...form, feedback: e.target.value })} /></label>
+        <button className='button' type='submit' disabled={isSubmitting}>{isSubmitting ? 'Sending...' : 'Send feedback'}</button>
       </form>
       <p className='hint'>Diagnostic ID: {sessionId()}</p>
-      {message !== '' && <p className='notice compact'>{message}</p>}
+      {message !== '' && <p className='notice compact' aria-live='polite'>{message}</p>}
     </section>
   )
 }
