@@ -65,6 +65,10 @@ curl_pod="papertrade-smoke-$(date +%s)"
   --command -- sh -ec '
     health="$(curl --fail --show-error --silent http://papertrade:8080/healthz)"
     printf "%s" "${health}" | grep -q "\"ok\":true"
+    large_header="$(head -c 24000 /dev/zero | tr "\000" A)"
+    curl --fail --show-error --silent --output /dev/null \
+      --header "x-papertrade-header-budget: ${large_header}" \
+      http://papertrade:8080/healthz
     curl --fail --show-error --silent --output /dev/null http://papertrade:8080/
     curl --fail --show-error --silent http://papertrade:8080/api/status | grep -q "\"status\":\"success\""
   '

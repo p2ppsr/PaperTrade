@@ -7,6 +7,9 @@ metadata:
     app.kubernetes.io/component: runtime-config
 data:
   NODE_ENV: "production"
+  # BRC-100 paid HTTP requests carry a signed transaction in a request header.
+  # Match the ingress budget so Node does not become the next 16 KB ceiling.
+  NODE_OPTIONS: "--max-http-header-size=32768"
   HTTP_PORT: "8080"
   ROUTING_PREFIX: "/api"
   BSV_NETWORK: "mainnet"

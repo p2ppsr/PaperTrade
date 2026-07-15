@@ -475,6 +475,14 @@ h1 {
   display: grid;
   gap: 16px;
   justify-items: center;
+  min-width: 0;
+  width: 100%;
+}
+
+.reader > .empty {
+  max-width: 100%;
+  overflow-wrap: anywhere;
+  word-break: break-word;
 }
 
 .reader-toolbar {
