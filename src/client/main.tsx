@@ -1321,6 +1321,14 @@ function Reader ({ status }: { status: Status | null }): JSX.Element {
   const navigate = useNavigate()
 
   useEffect(() => {
+    // React Router preserves the publication page's scroll offset. On narrow
+    // screens that can place the reader controls behind the sticky app header,
+    // making their visible labels untappable. Every reader route is a new page
+    // in the user's mental model, so start it at the top.
+    window.scrollTo({ top: 0, left: 0, behavior: 'auto' })
+  }, [id, currentPage])
+
+  useEffect(() => {
     let live = true
     const controller = new AbortController()
     let walletWaitTimer: number | undefined
