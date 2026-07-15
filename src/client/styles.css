@@ -1255,6 +1255,13 @@ h1 {
     padding: 5px 9px;
   }
 
+  .reader-toolbar {
+    /* The mobile header is also sticky and has a dynamic height. Keeping the
+       reader controls in normal flow prevents the header from covering their
+       visible hit targets after client-side navigation restores scroll. */
+    position: static;
+  }
+
   main {
     max-width: 100vw;
     padding: 22px 16px 42px;
