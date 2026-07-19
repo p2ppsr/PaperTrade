@@ -1201,8 +1201,11 @@ h1 {
     height: auto;
     overflow: visible;
     padding: 14px 16px;
-    position: sticky;
-    top: 0;
+    /* WebKit can under-size a sticky grid row while painting the header's
+       overflowing controls over main content. Keep the mobile header in
+       normal flow so every visible control also reserves hit-test space. */
+    position: relative;
+    top: auto;
     z-index: 3;
   }
 
