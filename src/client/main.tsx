@@ -1362,10 +1362,12 @@ function Reader ({ status }: { status: Status | null }): JSX.Element {
         accessMode: image.accessMode
       })
       postSignal(event.name, usercomMetadata(event))
-      postNativeQaMarker(
-        `papertrade-page-${currentPage}-rendered`,
-        `PaperTrade page ${currentPage} rendered`
-      )
+      if (currentPage > 1) {
+        postNativeQaMarker(
+          `papertrade-page-${currentPage}-rendered`,
+          `PaperTrade page ${currentPage} rendered`
+        )
+      }
     }
     setImageUrl(null)
     setMessage(currentPage > 1 ? 'Unlocking page...' : 'Loading page...')
