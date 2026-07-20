@@ -79,6 +79,18 @@ interface AuthorProfile {
   display_unit?: 'sats' | 'usd_cents' | null
 }
 
+function postNativeQaMarker (id: string, task: string): void {
+  const nativeWebView = (window as Window & {
+    ReactNativeWebView?: { postMessage?: (message: string) => void }
+  }).ReactNativeWebView
+  if (typeof nativeWebView?.postMessage !== 'function') return
+  nativeWebView.postMessage(JSON.stringify({
+    type: 'P0_QA_MARKER',
+    id,
+    task
+  }))
+}
+
 interface AuthorPayoutPayload {
   payoutId: string
   amountSats: number
@@ -1350,6 +1362,10 @@ function Reader ({ status }: { status: Status | null }): JSX.Element {
         accessMode: image.accessMode
       })
       postSignal(event.name, usercomMetadata(event))
+      postNativeQaMarker(
+        `papertrade-page-${currentPage}-rendered`,
+        `PaperTrade page ${currentPage} rendered`
+      )
     }
     setImageUrl(null)
     setMessage(currentPage > 1 ? 'Unlocking page...' : 'Loading page...')
