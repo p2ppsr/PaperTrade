@@ -4,6 +4,7 @@ const STATIC_ASSETS = [
   '/favicon.svg',
   '/icon.svg',
   '/og-image.svg',
+  '/.well-known/metanet-app.json',
   '/manifest.json'
 ]
 
