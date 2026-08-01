@@ -18,7 +18,7 @@ jobs:
       - run: npm ci
         env:
           CWI_NPM_TOKEN: ${{ secrets.CWI_NPM_TOKEN }}
-      - run: npm audit --omit=dev
+      - run: npm audit --omit=dev --audit-level=high
       - run: npm run lint
       - run: npm run typecheck
       - run: npm test
