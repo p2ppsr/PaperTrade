@@ -71,6 +71,19 @@ curl_pod="papertrade-smoke-$(date +%s)"
       http://papertrade:8080/healthz
     curl --fail --show-error --silent --output /dev/null http://papertrade:8080/
     curl --fail --show-error --silent http://papertrade:8080/api/status | grep -q "\"status\":\"success\""
+    publications="$(curl --fail --show-error --silent http://papertrade:8080/api/publications)"
+    publication_id="$(printf "%s" "${publications}" | sed -n "s/.*\"id\":\"\([^\"]*\)\".*/\1/p" | head -n 1)"
+    test -n "${publication_id}"
+    curl --fail --show-error --silent \
+      --dump-header /tmp/page-one.headers \
+      --output /tmp/page-one.png \
+      "http://papertrade:8080/api/publications/${publication_id}/pages/1"
+    grep -qi "^x-papertrade-page-access: free" /tmp/page-one.headers
+    test "$(head -c 8 /tmp/page-one.png | od -An -tx1 | tr -d " \n")" = "89504e470d0a1a0a"
+    paid_status="$(curl --show-error --silent --output /tmp/page-two.json --write-out "%{http_code}" \
+      "http://papertrade:8080/api/publications/${publication_id}/pages/2")"
+    test "${paid_status}" = "401"
+    grep -q "Authenticate with a BRC100 wallet" /tmp/page-two.json
   '
 
 printf 'PaperTrade deployment completed for papertrade.metanet.app\n'

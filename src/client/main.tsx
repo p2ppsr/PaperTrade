@@ -21,6 +21,12 @@ import {
   normalizeReaderPageAccessMode,
   type ReaderPageAccessMode
 } from './readerTelemetry'
+import {
+  normalizeWalletResult,
+  walletFailureSeverity,
+  walletHttpFailureSeverity,
+  walletTransactionSummary
+} from './walletCompatibility'
 
 type WalletSubstrate = 'auto' | 'json-api' | 'secure-json-api' | 'react-native' | 'Cicada' | 'XDM' | 'window.CWI'
 
@@ -261,8 +267,8 @@ function summarizeWalletResult (result: unknown): Record<string, unknown> {
   return cleanContext({
     resultType: 'object',
     accepted: typeof value.accepted === 'boolean' ? value.accepted : undefined,
-    hasTx: typeof value.tx === 'string' || Array.isArray(value.tx),
-    hasTxid: typeof value.txid === 'string',
+    ...walletTransactionSummary(result),
+    hasTransactionId: typeof value.txid === 'string',
     hasSignableTransaction: value.signableTransaction != null,
     outputCount: Array.isArray(value.outputs) ? value.outputs.length : undefined,
     actionCount: Array.isArray(value.actions) ? value.actions.length : undefined,
@@ -288,7 +294,8 @@ function instrumentWalletForTelemetry (wallet: WalletClient): WalletClient {
           }
         })
         try {
-          const result = await value.apply(target, args)
+          const rawResult = await value.apply(target, args)
+          const result = normalizeWalletResult(property, rawResult)
           postTelemetry('wallet.method_finished', 'info', {
             durationMs: performance.now() - startedAt,
             context: {
@@ -300,7 +307,7 @@ function instrumentWalletForTelemetry (wallet: WalletClient): WalletClient {
           return result
         } catch (err) {
           const message = err instanceof Error ? err.message : typeof err === 'string' ? err : 'Wallet method failed'
-          postTelemetry('wallet.method_failed', 'error', {
+          postTelemetry('wallet.method_failed', walletFailureSeverity(message, hasEmbeddedWalletBridge()), {
             durationMs: performance.now() - startedAt,
             context: {
               ...requestContext,
@@ -435,7 +442,7 @@ async function authFetch (url: string, init?: RequestInit, action = 'complete th
         context: { action, method, path: new URL(requestUrl).pathname }
       })
       const response = await fetcher.fetch(requestUrl, init as any)
-      postTelemetry(response.ok ? 'wallet.request_finished' : 'wallet.request_http_error', response.ok ? 'info' : 'warn', {
+      postTelemetry(response.ok ? 'wallet.request_finished' : 'wallet.request_http_error', response.ok ? 'info' : walletHttpFailureSeverity(response.status), {
         durationMs: performance.now() - startedAt,
         requestId: response.headers.get('x-papertrade-request-id'),
         context: {
@@ -470,7 +477,8 @@ async function authFetch (url: string, init?: RequestInit, action = 'complete th
         throw err
       }
       const normalized = normalizeWalletTransportError(err)
-      postTelemetry('wallet.request_failed', 'error', {
+      const failureSeverity = walletFailureSeverity(normalized.message, hasEmbeddedWalletBridge())
+      postTelemetry('wallet.request_failed', failureSeverity, {
         durationMs: performance.now() - startedAt,
         context: {
           method,
@@ -480,7 +488,7 @@ async function authFetch (url: string, init?: RequestInit, action = 'complete th
       })
       postSignal('wallet.action_failed', {
         surface: 'wallet',
-        tags: [`action:${tagValue(action)}`, `method:${method.toLowerCase()}`, 'status:failed'],
+        tags: [`action:${tagValue(action)}`, `method:${method.toLowerCase()}`, failureSeverity === 'error' ? 'status:failed' : 'status:unavailable'],
         context: {
           action,
           method,

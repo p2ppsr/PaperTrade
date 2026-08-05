@@ -16,6 +16,7 @@ import { createServerWallet, replacePersistedServerKey } from './wallet.js'
 import { getPublicationDir, processPublicationFile } from './content.js'
 import { STARTER_AUTHOR_NAME, STARTER_WORKS, starterCoverPath, starterWorkById, type StarterWork, writeStarterPdf } from './starterWorks.js'
 import { appManifest, metaForPath, renderHtmlShell, robotsTxt, sitemapXml, walletManifest, type PublicPublicationMeta } from './web.js'
+import { paymentForPaidPagesOnly } from './paymentRouting.js'
 
 const serverDirname = path.dirname(fileURLToPath(import.meta.url))
 const HTTP_PORT = Number(process.env.HTTP_PORT ?? process.env.PORT ?? '3001')
@@ -1089,6 +1090,7 @@ async function createApp (): Promise<express.Express> {
     wallet: walletBootstrap.wallet,
     calculateRequestPrice: calculatePagePrice as any
   })
+  const paidPagePaymentMiddleware = paymentForPaidPagesOnly(pagePaymentMiddleware)
 
   const calculateAdminFundingPrice = (req: { body?: { amountSats?: unknown } }): number => asPositiveInteger(req.body?.amountSats, 0)
 
@@ -1276,7 +1278,7 @@ async function createApp (): Promise<express.Express> {
     }
   })
 
-  api.get('/publications/:id/pages/:pageNumber', requireReaderForPaidPage, pagePaymentMiddleware, async (req, res, next) => {
+  api.get('/publications/:id/pages/:pageNumber', requireReaderForPaidPage, paidPagePaymentMiddleware, async (req, res, next) => {
     try {
       await sendPageImage(req, res, walletBootstrap.privateKeyHex)
     } catch (err) {

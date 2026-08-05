@@ -161,7 +161,8 @@ fi
 
 if [[ "${build_target}" == "app" || "${build_target}" == "all" ]]; then
   run_kaniko "Dockerfile" "${app_push_image}" \
-    --build-arg="RUNTIME_BASE_IMAGE=${runtime_base_image}"
+    --build-arg="RUNTIME_BASE_IMAGE=${runtime_base_image}" \
+    --build-arg="VITE_APP_VERSION=${source_sha}"
   last_image="${app_pull_image}"
   last_tag="${image_tag}"
 fi
