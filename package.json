@@ -39,7 +39,7 @@
     "@bsv/auth-express-middleware": "2.1.7",
     "@bsv/identity-react": "^1.1.14",
     "@bsv/payment-express-middleware": "2.1.5",
-    "@bsv/sdk": "^2.4.0",
+    "@bsv/sdk": "2.3.0",
     "@bsv/wallet-toolbox": "2.5.0",
     "@emotion/react": "^11.14.0",
     "@emotion/styled": "^11.14.1",

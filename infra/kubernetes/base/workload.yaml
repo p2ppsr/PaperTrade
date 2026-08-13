@@ -8,7 +8,10 @@ metadata:
 spec:
   replicas: 1
   strategy:
-    type: Recreate
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
   selector:
     matchLabels:
       app.kubernetes.io/name: papertrade
@@ -19,6 +22,17 @@ spec:
         app.kubernetes.io/name: papertrade
         app.kubernetes.io/component: api
     spec:
+      # PaperTrade's content PVC is ReadWriteOnce. Keep the surge pod on the
+      # current pod's node so both revisions can mount it during a zero-downtime
+      # rollout without attempting a cross-node Longhorn attachment.
+      affinity:
+        podAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            - labelSelector:
+                matchLabels:
+                  app.kubernetes.io/name: papertrade
+                  app.kubernetes.io/component: api
+              topologyKey: kubernetes.io/hostname
       containers:
         - name: papertrade
           image: papertrade:local
