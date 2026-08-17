@@ -1214,25 +1214,18 @@ h1 {
   }
 
   nav {
-    display: flex;
+    display: grid;
     gap: 6px;
-    max-width: 100%;
-    overflow-x: auto;
-    padding-bottom: 2px;
-    scrollbar-width: none;
-  }
-
-  nav::-webkit-scrollbar {
-    display: none;
+    grid-template-columns: repeat(auto-fit, minmax(88px, 1fr));
+    width: 100%;
   }
 
   nav a {
-    flex: 0 0 auto;
     font-size: 14px;
     gap: 6px;
     justify-content: center;
     min-height: 38px;
-    min-width: max-content;
+    min-width: 0;
     overflow: hidden;
     padding: 0 8px;
     white-space: nowrap;
