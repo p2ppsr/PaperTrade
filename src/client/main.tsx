@@ -1425,9 +1425,9 @@ function Reader ({ status }: { status: Status | null }): JSX.Element {
   return (
     <section className='reader'>
       <div className='reader-toolbar'>
-        <button type='button' disabled={isLoading} onClick={() => navigate(`/read/${id}/${Math.max(1, currentPage - 1)}`)}>Previous</button>
+        <button type='button' disabled={isLoading} onClick={() => { void navigate(`/read/${id}/${Math.max(1, currentPage - 1)}`) }}>Previous</button>
         <span>Page {currentPage}</span>
-        <button type='button' disabled={isLoading} onClick={() => navigate(`/read/${id}/${currentPage + 1}`)}>Next</button>
+        <button type='button' disabled={isLoading} onClick={() => { void navigate(`/read/${id}/${currentPage + 1}`) }}>Next</button>
       </div>
       {message !== '' && !isWalletHelpMessage(message) && <p className='empty'>{message}</p>}
       <WalletHelp message={message} freePageUrl={currentPage > 1 ? `/read/${id}/1` : undefined} />
@@ -1479,9 +1479,9 @@ function AuthorPreview (): JSX.Element {
     <section className='reader'>
       <div className='reader-toolbar'>
         <Link className='button secondary' to={backPath}>{isAdminPreview ? 'Back to admin' : 'Back to author'}</Link>
-        <button type='button' onClick={() => navigate(`${previewBase}/${id}/${Math.max(1, currentPage - 1)}`)}>Previous</button>
+        <button type='button' onClick={() => { void navigate(`${previewBase}/${id}/${Math.max(1, currentPage - 1)}`) }}>Previous</button>
         <span>Preview page {currentPage}</span>
-        <button type='button' onClick={() => navigate(`${previewBase}/${id}/${currentPage + 1}`)}>Next</button>
+        <button type='button' onClick={() => { void navigate(`${previewBase}/${id}/${currentPage + 1}`) }}>Next</button>
       </div>
       {message !== '' && !isWalletHelpMessage(message) && <p className='empty'>{message}</p>}
       <WalletHelp message={message} />
