@@ -13,7 +13,7 @@ import { createPaymentMiddleware } from '@bsv/payment-express-middleware'
 import { db, getSettings, isAdmin, writeAudit } from './db.js'
 import { asPositiveInteger, splitCommission } from './money.js'
 import { createServerWallet, replacePersistedServerKey } from './wallet.js'
-import { getPublicationDir, processPublicationFile } from './content.js'
+import { ensurePageText, getPublicationDir, processPublicationFile } from './content.js'
 import { STARTER_AUTHOR_NAME, STARTER_WORKS, starterCoverPath, starterWorkById, type StarterWork, writeStarterPdf } from './starterWorks.js'
 import { appManifest, metaForPath, renderHtmlShell, robotsTxt, sitemapXml, walletManifest, type PublicPublicationMeta } from './web.js'
 import { paymentForPaidPagesOnly } from './paymentRouting.js'
@@ -614,7 +614,23 @@ async function sendPublicationPageImage (
     res.setHeader('X-PaperTrade-Page-Access', pageAccessMode)
   }
   res.setHeader('Cache-Control', 'private, max-age=60')
-  if (req.query.format === 'json' && pageTokenSecret != null && readerIdentityKey != null) {
+  if (req.query.format === 'json' && pageTokenSecret != null) {
+    const extracted = await ensurePageText(
+      publication.canonical_pdf_path,
+      page.image_path,
+      getPublicationDir(String(publication.id)),
+      pageNumber,
+      page.text_path
+    )
+    if (page.text_path == null || page.text_path === '') {
+      await db('publication_pages').where({ id: page.id }).update({
+        text_path: extracted.textPath,
+        text_sha256: extracted.textSha256,
+        text_bytes: extracted.textBytes,
+        text_source: extracted.textSource,
+        updated_at: db.fn.now()
+      })
+    }
     const expiresAt = Date.now() + PAGE_ACCESS_TOKEN_TTL_MS
     const token = createPageAccessToken(pageTokenSecret, {
       publicationId: publication.id,
@@ -627,6 +643,8 @@ async function sendPublicationPageImage (
       status: 'success',
       mimeType: 'image/png',
       pageAccessMode,
+      text: extracted.text,
+      textSource: extracted.textSource,
       imageUrl: `${ROUTING_PREFIX}/publications/${String(publication.id)}/pages/${pageNumber}/rendered?token=${encodeURIComponent(token)}`,
       expiresAt
     })
@@ -731,6 +749,7 @@ function appRoutePath (pathName: string): boolean {
   return pathName === '/' ||
     pathName === '/about' ||
     pathName === '/help' ||
+    pathName === '/settings' ||
     pathName === '/author' ||
     pathName === '/admin' ||
     pathName === '/setup' ||
@@ -779,7 +798,11 @@ async function processAndStorePublicationUpload (
         page_number: page.pageNumber,
         image_path: page.imagePath,
         sha256: page.sha256,
-        bytes: page.bytes
+        bytes: page.bytes,
+        text_path: page.textPath,
+        text_sha256: page.textSha256,
+        text_bytes: page.textBytes,
+        text_source: page.textSource
       })))
       await trx('publications').where({ id: publication.id }).update({
         page_count: processed.pageCount,

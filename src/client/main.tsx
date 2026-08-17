@@ -1,9 +1,9 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react'
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { createRoot } from 'react-dom/client'
 import { BrowserRouter, Link, Route, Routes, useLocation, useNavigate, useParams } from 'react-router-dom'
 import { AuthFetch, Utils, WalletClient } from '@bsv/sdk'
 import { IdentityCard } from '@bsv/identity-react'
-import { Activity, BookOpen, Check, ExternalLink, FileText, Github, HelpCircle, Home, Image, Info, Library, MessageCircle, Monitor, Palette, RefreshCw, Search, Settings, Share2, Smartphone, Upload, User, X } from 'lucide-react'
+import { Activity, BookOpen, Check, ExternalLink, FileText, Github, HelpCircle, Home, Image, Info, Library, MessageCircle, Monitor, Palette, Pause, Play, RefreshCw, Search, Settings, Share2, SlidersHorizontal, Smartphone, Square, Upload, User, Volume2, X } from 'lucide-react'
 import './styles.css'
 import {
   buildUsercomFeedback,
@@ -27,6 +27,12 @@ import {
   walletHttpFailureSeverity,
   walletTransactionSummary
 } from './walletCompatibility'
+import {
+  loadReaderSpeechPreferences,
+  saveReaderSpeechPreferences,
+  speechChunks,
+  type ReaderSpeechPreferences
+} from './readerSpeech'
 
 type WalletSubstrate = 'auto' | 'json-api' | 'secure-json-api' | 'react-native' | 'Cicada' | 'XDM' | 'window.CWI'
 
@@ -175,6 +181,7 @@ interface ReaderPageImage {
   src: string
   revokeOnEvict: boolean
   accessMode: ReaderPageAccessMode
+  text: string
 }
 const readerPageImageCache = new Map<string, ReaderPageImage>()
 const READER_PAGE_BLOB_CACHE_LIMIT = 50
@@ -574,7 +581,7 @@ function cachedReaderPageImage (publicationId: string, pageNumber: number): Read
 }
 
 async function pageFetch (url: string, pageNumber: number, signal?: AbortSignal): Promise<Response> {
-  if (pageNumber === 1) return await fetch(url, signal == null ? undefined : { signal })
+  if (pageNumber === 1) return await fetch(withFormatJson(url), signal == null ? undefined : { signal })
   return await protectedPageFetch(withFormatJson(url), signal)
 }
 
@@ -598,6 +605,7 @@ async function responseToPageImage (res: Response, fallbackMessage: string, expe
     const mimeType = typeof json.mimeType === 'string' ? json.mimeType : ''
     const dataBase64 = typeof json.dataBase64 === 'string' ? json.dataBase64 : ''
     const accessMode = normalizeReaderPageAccessMode(json.pageAccessMode ?? json.accessMode)
+    const text = typeof json.text === 'string' ? json.text : ''
     if (typeof json.imageUrl === 'string') {
       postTelemetry('reader.page_image_url_fetch_started', 'info', {
         context: { path: new URL(absoluteRequestUrl(json.imageUrl)).pathname }
@@ -607,10 +615,10 @@ async function responseToPageImage (res: Response, fallbackMessage: string, expe
       postTelemetry('reader.page_image_url_fetch_finished', 'info', {
         context: { path: new URL(absoluteRequestUrl(json.imageUrl)).pathname }
       })
-      return { ...image, accessMode }
+      return { ...image, accessMode, text }
     }
     if (mimeType === 'image/png' && dataBase64 !== '') {
-      return { src: `data:${mimeType};base64,${dataBase64}`, revokeOnEvict: false, accessMode }
+      return { src: `data:${mimeType};base64,${dataBase64}`, revokeOnEvict: false, accessMode, text }
     }
     throw new Error(`${fallbackMessage}: server did not return a rendered page image`)
   }
@@ -629,7 +637,8 @@ async function responseToPageImage (res: Response, fallbackMessage: string, expe
   return {
     src: URL.createObjectURL(blob),
     revokeOnEvict: true,
-    accessMode: normalizeReaderPageAccessMode(res.headers.get('x-papertrade-page-access'))
+    accessMode: normalizeReaderPageAccessMode(res.headers.get('x-papertrade-page-access')),
+    text: ''
   }
 }
 
@@ -1186,6 +1195,7 @@ function Shell ({ children, status }: { children: React.ReactNode, status: Statu
           <Link to='/'><Home size={18} /> {appearance.newsstandLabel}</Link>
           <Link to='/help'><HelpCircle size={18} /> Help</Link>
           <Link to='/about'><Info size={18} /> About</Link>
+          <Link to='/settings'><SlidersHorizontal size={18} /> Reader settings</Link>
           <Link to='/author'><User size={18} /> Author</Link>
           <Link to='/admin'><Settings size={18} /> Admin</Link>
         </nav>
@@ -1332,13 +1342,165 @@ function PublicationDetail ({ status }: { status: Status | null }): JSX.Element 
   )
 }
 
+function browserVoices (): SpeechSynthesisVoice[] {
+  return typeof window.speechSynthesis === 'undefined' ? [] : window.speechSynthesis.getVoices()
+}
+
+function ReaderSettings (): JSX.Element {
+  const supported = typeof window.speechSynthesis !== 'undefined' && typeof window.SpeechSynthesisUtterance !== 'undefined'
+  const [preferences, setPreferences] = useState<ReaderSpeechPreferences>(() => loadReaderSpeechPreferences(window.localStorage))
+  const [voices, setVoices] = useState<SpeechSynthesisVoice[]>(browserVoices)
+  const [saved, setSaved] = useState(false)
+
+  useEffect(() => {
+    if (!supported) return
+    const refreshVoices = (): void => setVoices(browserVoices())
+    refreshVoices()
+    window.speechSynthesis.addEventListener('voiceschanged', refreshVoices)
+    return () => window.speechSynthesis.removeEventListener('voiceschanged', refreshVoices)
+  }, [supported])
+
+  const save = (): void => {
+    saveReaderSpeechPreferences(window.localStorage, preferences)
+    setSaved(true)
+    postSignal('reader.audio_preferences_saved', usercomMetadata({
+      name: 'reader.audio_preferences_saved',
+      surface: 'reader_settings',
+      tags: [preferences.autoRead ? 'auto_read:on' : 'auto_read:off'],
+      context: { rate: preferences.rate, voiceSelected: preferences.voiceURI !== '' }
+    }))
+  }
+
+  return (
+    <section className='surface reader-settings'>
+      <header className='page-head'>
+        <div>
+          <h1>Reader settings</h1>
+          <p>Choose how PaperTrade reads accessible page text aloud on this device.</p>
+        </div>
+        <Volume2 size={30} aria-hidden='true' />
+      </header>
+      {!supported && <p className='empty'>This browser does not provide a speech reader. You can still use your device screen reader with PaperTrade.</p>}
+      <section className='tool-panel'>
+        <label className='toggle-row'>
+          <input
+            type='checkbox'
+            checked={preferences.autoRead}
+            disabled={!supported}
+            onChange={event => { setSaved(false); setPreferences({ ...preferences, autoRead: event.target.checked }) }}
+          />
+          <span><strong>Read each page automatically</strong><small>Start speaking after the opened page and its accessible text are ready.</small></span>
+        </label>
+        <label>Reading speed
+          <select
+            value={preferences.rate}
+            disabled={!supported}
+            onChange={event => { setSaved(false); setPreferences({ ...preferences, rate: Number(event.target.value) }) }}
+          >
+            <option value={0.75}>Slower (0.75×)</option>
+            <option value={1}>Normal (1×)</option>
+            <option value={1.25}>Faster (1.25×)</option>
+            <option value={1.5}>Fast (1.5×)</option>
+            <option value={2}>Very fast (2×)</option>
+          </select>
+        </label>
+        <label>Voice
+          <select
+            value={preferences.voiceURI}
+            disabled={!supported}
+            onChange={event => { setSaved(false); setPreferences({ ...preferences, voiceURI: event.target.value }) }}
+          >
+            <option value=''>Device default</option>
+            {voices.map(voice => <option key={voice.voiceURI} value={voice.voiceURI}>{voice.name} ({voice.lang})</option>)}
+          </select>
+        </label>
+        <button className='button' type='button' disabled={!supported} onClick={save}><Check size={18} /> Save reader settings</button>
+        {saved && <p className='success-message' role='status'>Reader settings saved on this device.</p>}
+      </section>
+      <p className='settings-note'>PaperTrade uses the voices built into your browser or device. Page text stays in the reader and is not sent to an external speech service.</p>
+    </section>
+  )
+}
+
 function Reader ({ status }: { status: Status | null }): JSX.Element {
   const { id = '', pageNumber = '1' } = useParams()
   const currentPage = Number(pageNumber)
   const [imageUrl, setImageUrl] = useState<string | null>(null)
   const [message, setMessage] = useState('Loading page...')
   const [isLoading, setIsLoading] = useState(true)
+  const [pageText, setPageText] = useState('')
+  const [speechState, setSpeechState] = useState<'idle' | 'speaking' | 'paused'>('idle')
+  const [speechMessage, setSpeechMessage] = useState('')
+  const [preferences] = useState<ReaderSpeechPreferences>(() => loadReaderSpeechPreferences(window.localStorage))
+  const [voices, setVoices] = useState<SpeechSynthesisVoice[]>(browserVoices)
+  const speechRun = useRef(0)
+  const lastAutoReadPage = useRef('')
   const navigate = useNavigate()
+  const speechSupported = typeof window.speechSynthesis !== 'undefined' && typeof window.SpeechSynthesisUtterance !== 'undefined'
+
+  useEffect(() => {
+    if (!speechSupported) return
+    const refreshVoices = (): void => setVoices(browserVoices())
+    refreshVoices()
+    window.speechSynthesis.addEventListener('voiceschanged', refreshVoices)
+    return () => window.speechSynthesis.removeEventListener('voiceschanged', refreshVoices)
+  }, [speechSupported])
+
+  const stopSpeech = useCallback((): void => {
+    speechRun.current += 1
+    if (speechSupported) window.speechSynthesis.cancel()
+    setSpeechState('idle')
+  }, [speechSupported])
+
+  const speakPage = useCallback((): void => {
+    if (!speechSupported) {
+      setSpeechMessage('This browser does not provide a speech reader.')
+      return
+    }
+    const chunks = speechChunks(pageText)
+    if (chunks.length === 0) {
+      setSpeechMessage('No readable text was found on this page.')
+      return
+    }
+    const run = speechRun.current + 1
+    speechRun.current = run
+    window.speechSynthesis.cancel()
+    setSpeechMessage('')
+    setSpeechState('speaking')
+    const voice = voices.find(candidate => candidate.voiceURI === preferences.voiceURI)
+    const speakChunk = (index: number): void => {
+      if (speechRun.current !== run) return
+      if (index >= chunks.length) {
+        setSpeechState('idle')
+        postSignal('reader.audio_finished', usercomMetadata({ name: 'reader.audio_finished', surface: 'reader', tags: ['accessibility'], context: { publicationId: id, pageNumber: currentPage } }))
+        return
+      }
+      const utterance = new SpeechSynthesisUtterance(chunks[index])
+      utterance.rate = preferences.rate
+      if (voice != null) utterance.voice = voice
+      utterance.onend = () => speakChunk(index + 1)
+      utterance.onerror = event => {
+        if (speechRun.current !== run || event.error === 'canceled' || event.error === 'interrupted') return
+        setSpeechState('idle')
+        setSpeechMessage('The device speech reader could not play this page.')
+      }
+      window.speechSynthesis.speak(utterance)
+    }
+    postSignal('reader.audio_started', usercomMetadata({ name: 'reader.audio_started', surface: 'reader', tags: ['accessibility'], context: { publicationId: id, pageNumber: currentPage, autoRead: preferences.autoRead } }))
+    speakChunk(0)
+  }, [currentPage, id, pageText, preferences.autoRead, preferences.rate, preferences.voiceURI, speechSupported, voices])
+
+  useEffect(() => () => {
+    speechRun.current += 1
+    if (speechSupported) window.speechSynthesis.cancel()
+  }, [speechSupported])
+
+  useEffect(() => {
+    const pageKey = `${id}:${currentPage}`
+    if (!preferences.autoRead || pageText === '' || isLoading || lastAutoReadPage.current === pageKey) return
+    lastAutoReadPage.current = pageKey
+    speakPage()
+  }, [currentPage, id, isLoading, pageText, preferences.autoRead, speakPage])
 
   useEffect(() => {
     // React Router preserves the publication page's scroll offset. On narrow
@@ -1361,6 +1523,7 @@ function Reader ({ status }: { status: Status | null }): JSX.Element {
     const renderImage = (image: ReaderPageImage, cacheHit: boolean): void => {
       clearWalletWaitTimer()
       setImageUrl(image.src)
+      setPageText(image.text)
       setMessage('')
       setIsLoading(false)
       const event = buildReaderPageLoadedTelemetry({
@@ -1378,6 +1541,9 @@ function Reader ({ status }: { status: Status | null }): JSX.Element {
       }
     }
     setImageUrl(null)
+    stopSpeech()
+    setPageText('')
+    setSpeechMessage('')
     setMessage(currentPage > 1 ? 'Unlocking page...' : 'Loading page...')
     setIsLoading(true)
     const cachedImage = cachedReaderPageImage(id, currentPage)
@@ -1420,7 +1586,7 @@ function Reader ({ status }: { status: Status | null }): JSX.Element {
       controller.abort()
       clearWalletWaitTimer()
     }
-  }, [id, currentPage])
+  }, [id, currentPage, stopSpeech])
 
   return (
     <section className='reader'>
@@ -1429,9 +1595,18 @@ function Reader ({ status }: { status: Status | null }): JSX.Element {
         <span>Page {currentPage}</span>
         <button type='button' disabled={isLoading} onClick={() => { void navigate(`/read/${id}/${currentPage + 1}`) }}>Next</button>
       </div>
+      <div className='audio-toolbar' aria-label='Audio reader controls'>
+        <button type='button' disabled={isLoading || pageText === '' || speechState === 'speaking'} onClick={speakPage}><Play size={18} /> Read aloud</button>
+        {speechState === 'speaking' && <button type='button' className='secondary' onClick={() => { window.speechSynthesis.pause(); setSpeechState('paused') }}><Pause size={18} /> Pause</button>}
+        {speechState === 'paused' && <button type='button' className='secondary' onClick={() => { window.speechSynthesis.resume(); setSpeechState('speaking') }}><Play size={18} /> Resume</button>}
+        <button type='button' className='secondary' disabled={speechState === 'idle'} onClick={stopSpeech}><Square size={16} /> Stop</button>
+        <Link to='/settings'><Settings size={18} /> Audio settings</Link>
+      </div>
+      {speechMessage !== '' && <p className='empty' role='status'>{speechMessage}</p>}
       {message !== '' && !isWalletHelpMessage(message) && <p className='empty'>{message}</p>}
       <WalletHelp message={message} freePageUrl={currentPage > 1 ? `/read/${id}/1` : undefined} />
       {imageUrl != null && <img className='page-image' src={imageUrl} alt={`Rendered page ${currentPage}`} />}
+      {pageText !== '' && <details className='page-text'><summary>Accessible page text</summary><p>{pageText}</p></details>}
     </section>
   )
 }
@@ -2399,6 +2574,7 @@ function AppRoutes ({ status, refresh }: { status: Status | null, refresh: () =>
         <Route path='/' element={<Newsstand status={status} />} />
         <Route path='/publication/:id' element={<PublicationDetail status={status} />} />
         <Route path='/read/:id/:pageNumber' element={<Reader status={status} />} />
+        <Route path='/settings' element={<ReaderSettings />} />
         <Route path='/author' element={<Author status={status} />} />
         <Route path='/author/read/:id/:pageNumber' element={<AuthorPreview />} />
         <Route path='/admin' element={<Admin status={status} refreshStatus={refresh} />} />

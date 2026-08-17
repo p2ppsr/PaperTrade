@@ -499,6 +499,90 @@ h1 {
   z-index: 1;
 }
 
+.audio-toolbar {
+  align-items: center;
+  background: var(--pt-surface);
+  border: 1px solid var(--pt-border);
+  border-radius: 8px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  justify-content: center;
+  padding: 10px;
+}
+
+.audio-toolbar a {
+  align-items: center;
+  color: var(--pt-primary);
+  display: inline-flex;
+  font-weight: 800;
+  gap: 7px;
+  min-height: 42px;
+  padding: 0 10px;
+}
+
+.page-text {
+  background: var(--pt-surface);
+  border: 1px solid var(--pt-border);
+  border-radius: 8px;
+  max-width: min(100%, 980px);
+  padding: 14px 18px;
+  width: 100%;
+}
+
+.page-text summary {
+  color: var(--pt-primary);
+  cursor: pointer;
+  font-weight: 800;
+}
+
+.page-text p {
+  line-height: 1.65;
+  white-space: pre-wrap;
+}
+
+.reader-settings {
+  max-width: 760px;
+}
+
+.reader-settings .tool-panel {
+  margin-top: 18px;
+}
+
+.toggle-row {
+  align-items: start;
+  background: var(--pt-soft);
+  border: 1px solid var(--pt-border);
+  border-radius: 8px;
+  display: flex;
+  gap: 12px;
+  padding: 14px;
+}
+
+.toggle-row input[type="checkbox"] {
+  flex: 0 0 auto;
+  margin: 3px 0 0;
+  min-height: 20px;
+  width: 20px;
+}
+
+.toggle-row span {
+  display: grid;
+  gap: 5px;
+}
+
+.toggle-row small,
+.settings-note {
+  color: var(--pt-muted);
+  font-weight: 500;
+  line-height: 1.5;
+}
+
+.success-message {
+  color: var(--pt-primary);
+  font-weight: 800;
+}
+
 .page-image {
   background: var(--pt-surface);
   border: 1px solid var(--pt-border);

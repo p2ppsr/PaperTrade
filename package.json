@@ -1,6 +1,6 @@
 {
   "name": "papertrade",
-  "version": "0.1.2",
+  "version": "0.2.0",
   "type": "module",
   "description": "Open-source BSV newsstand for pay-per-page publishing with BRC100 wallets.",
   "license": "Open BSV License",

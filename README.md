@@ -20,6 +20,7 @@ PaperTrade shows a complete wallet-native content commerce flow:
 - BRC100 identity for readers, authors, and admins;
 - first-page-free discovery;
 - per-page payment and entitlement checks;
+- accessible page text with built-in read-aloud controls and optional auto-read;
 - server-side publication rendering for PDF, docx, and ePub uploads;
 - author balances and payout workflow;
 - feedback and funnel telemetry through UserCom.
@@ -35,6 +36,12 @@ Open the live server and read page 1 of any public-domain work:
 
 Paid pages require a compatible BRC100 wallet browser or wallet bridge. The app
 links to wallet setup from protected flows when one is not available.
+
+Use **Reader settings** to choose a device voice and reading speed, or enable
+automatic read-aloud whenever a page opens. PaperTrade extracts embedded PDF
+text and falls back to OCR for scanned/image-only pages. Speech uses the
+browser or device voice and does not send page text to a third-party speech
+service.
 
 ## Run Locally
 
@@ -74,8 +81,9 @@ npm start
 
 ## Docker
 
-The application runtime uses LibreOffice, Calibre, and Poppler for document
-conversion. Build the runtime base first, then the app image:
+The application runtime uses LibreOffice, Calibre, Poppler, and Tesseract for
+document conversion, page rendering, text extraction, and OCR. Build the
+runtime base first, then the app image:
 
 ```sh
 docker build -f Dockerfile.runtime-base -t papertrade-runtime-base:local .

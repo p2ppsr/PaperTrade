@@ -11,6 +11,8 @@ RUN apt-get update \
   && apt-get install -y --no-install-recommends \
     ca-certificates \
     poppler-utils \
+    tesseract-ocr \
+    tesseract-ocr-eng \
     libreoffice-writer \
     calibre \
   && rm -rf /usr/local/lib/node_modules \

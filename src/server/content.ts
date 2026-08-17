@@ -11,12 +11,23 @@ export interface ProcessedPublicationFile {
   publicationDir: string
   sourcePath: string
   canonicalPdfPath: string
-  pages: Array<{ pageNumber: number, imagePath: string, sha256: string, bytes: number }>
+  pages: ProcessedPublicationPage[]
   pageCount: number
   sourceSha256: string
   sourceBytes: number
   canonicalSha256: string
   canonicalBytes: number
+}
+
+export interface ProcessedPublicationPage {
+  pageNumber: number
+  imagePath: string
+  sha256: string
+  bytes: number
+  textPath: string
+  textSha256: string
+  textBytes: number
+  textSource: 'pdf' | 'ocr' | 'none'
 }
 
 export function getPublicationDir (publicationId: string): string {
@@ -99,6 +110,89 @@ async function renderPage (pdfPath: string, publicationDir: string, pageNumber: 
   }
 }
 
+export function normalizePageText (value: string): string {
+  return value
+    .split(String.fromCharCode(0)).join('')
+    .replace(/\r\n?/g, '\n')
+    .replace(/[\t ]+/g, ' ')
+    .replace(/ *\n */g, '\n')
+    .replace(/\n{3,}/g, '\n\n')
+    .replace(/\f/g, '')
+    .trim()
+}
+
+function meaningfulTextLength (value: string): number {
+  return value.replace(/[^\p{L}\p{N}]/gu, '').length
+}
+
+export async function extractPageText (
+  pdfPath: string,
+  imagePath: string,
+  publicationDir: string,
+  pageNumber: number
+): Promise<{ textPath: string, textSha256: string, textBytes: number, textSource: 'pdf' | 'ocr' | 'none' }> {
+  const textPath = path.join(publicationDir, `page-${String(pageNumber).padStart(4, '0')}.txt`)
+  let pdfText = ''
+  try {
+    const { stdout } = await execFileAsync('pdftotext', [
+      '-f', String(pageNumber),
+      '-l', String(pageNumber),
+      '-layout',
+      '-enc', 'UTF-8',
+      pdfPath,
+      '-'
+    ], { timeout: 30000, maxBuffer: 10 * 1024 * 1024 })
+    pdfText = normalizePageText(stdout)
+  } catch {}
+
+  let text = pdfText
+  let textSource: 'pdf' | 'ocr' | 'none' = meaningfulTextLength(pdfText) >= 20 ? 'pdf' : 'none'
+  if (textSource === 'none') {
+    try {
+      const { stdout } = await execFileAsync('tesseract', [imagePath, 'stdout', '-l', 'eng', '--psm', '3'], {
+        timeout: 120000,
+        maxBuffer: 10 * 1024 * 1024
+      })
+      const ocrText = normalizePageText(stdout)
+      if (meaningfulTextLength(ocrText) > meaningfulTextLength(text)) {
+        text = ocrText
+        textSource = meaningfulTextLength(ocrText) > 0 ? 'ocr' : 'none'
+      }
+    } catch {}
+  }
+
+  await fs.writeFile(textPath, text, 'utf8')
+  return {
+    textPath,
+    textSha256: await sha256File(textPath),
+    textBytes: await statSize(textPath),
+    textSource
+  }
+}
+
+export async function ensurePageText (
+  canonicalPdfPath: string,
+  imagePath: string,
+  publicationDir: string,
+  pageNumber: number,
+  existingTextPath?: string | null
+): Promise<{ text: string, textPath: string, textSha256: string, textBytes: number, textSource: 'pdf' | 'ocr' | 'none' }> {
+  if (existingTextPath != null && existingTextPath !== '') {
+    try {
+      const text = normalizePageText(await fs.readFile(existingTextPath, 'utf8'))
+      return {
+        text,
+        textPath: existingTextPath,
+        textSha256: await sha256File(existingTextPath),
+        textBytes: await statSize(existingTextPath),
+        textSource: text === '' ? 'none' : 'pdf'
+      }
+    } catch {}
+  }
+  const extracted = await extractPageText(canonicalPdfPath, imagePath, publicationDir, pageNumber)
+  return { text: normalizePageText(await fs.readFile(extracted.textPath, 'utf8')), ...extracted }
+}
+
 export async function processPublicationFile (
   publicationId: string,
   tempPath: string,
@@ -120,9 +214,11 @@ export async function processPublicationFile (
     throw new Error('PaperTrade requires at least 5 pages')
   }
 
-  const pages = []
+  const pages: ProcessedPublicationPage[] = []
   for (let pageNumber = 1; pageNumber <= pageCount; pageNumber += 1) {
-    pages.push(await renderPage(canonicalPdfPath, publicationDir, pageNumber))
+    const rendered = await renderPage(canonicalPdfPath, publicationDir, pageNumber)
+    const extracted = await extractPageText(canonicalPdfPath, rendered.imagePath, publicationDir, pageNumber)
+    pages.push({ ...rendered, ...extracted })
   }
 
   return {
