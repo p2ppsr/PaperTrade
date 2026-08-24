@@ -1,4 +1,5 @@
 ARG NODE_IMAGE=node:24-trixie-slim@sha256:0711b541c1c33a8a530ac4f0d391baa9a15b3d804695b1b24a47daa5fb60e74d
+ARG RUNTIME_BASE_IMAGE=papertrade-runtime-base:local
 FROM ${NODE_IMAGE} AS build
 
 ARG VITE_APP_VERSION=browser
@@ -15,7 +16,6 @@ RUN npm ci && npm cache clean --force
 COPY . .
 RUN npm run build && npm prune --omit=dev
 
-ARG RUNTIME_BASE_IMAGE=papertrade-runtime-base:local
 FROM ${RUNTIME_BASE_IMAGE}
 
 ENV NODE_ENV=production
