@@ -1,0 +1,74 @@
+[
+  {
+    "vulnerability": "CVE-2026-58016",
+    "package": "libglib2.0-0t64",
+    "installed_version": "2.84.4-3~deb13u3",
+    "reviewed_on": "2026-08-24",
+    "expires": "2026-09-07",
+    "rationale": "Debian Trixie marks the GDBus introspection XML denial of service as minor/no-DSA and has no Trixie fix; PaperTrade does not parse caller-supplied D-Bus introspection XML.",
+    "source": "https://security-tracker.debian.org/tracker/CVE-2026-58016"
+  },
+  {
+    "vulnerability": "CVE-2026-34873",
+    "package": "libmbedcrypto16",
+    "installed_version": "3.6.5-0.1~deb13u1",
+    "reviewed_on": "2026-08-24",
+    "expires": "2026-09-07",
+    "rationale": "Debian Trixie marks this TLS 1.3 resumption issue as minor/no-DSA and has no Trixie fix; the runtime carries the crypto library transitively and does not use Mbed TLS for its public HTTPS termination.",
+    "source": "https://security-tracker.debian.org/tracker/CVE-2026-34873"
+  },
+  {
+    "vulnerability": "CVE-2026-34875",
+    "package": "libmbedcrypto16",
+    "installed_version": "3.6.5-0.1~deb13u1",
+    "reviewed_on": "2026-08-24",
+    "expires": "2026-09-07",
+    "rationale": "Debian Trixie marks the FFDH export overflow as minor/no-DSA and has no Trixie fix; PaperTrade does not expose an Mbed TLS FFDH key-export operation.",
+    "source": "https://security-tracker.debian.org/tracker/CVE-2026-34875"
+  },
+  {
+    "vulnerability": "CVE-2026-6653",
+    "package": "libxml2",
+    "installed_version": "2.12.7+dfsg+really2.9.14-2.1+deb13u3",
+    "reviewed_on": "2026-08-24",
+    "expires": "2026-09-07",
+    "rationale": "Debian Trixie marks the crafted-XML denial of service as minor/no-DSA and has no Trixie fix. Document conversion can process untrusted input, so this remains a short exception that must be removed as soon as Debian publishes a fix.",
+    "source": "https://security-tracker.debian.org/tracker/CVE-2026-6653"
+  },
+  {
+    "vulnerability": "CVE-2026-13221",
+    "package": "perl-base",
+    "installed_version": "5.40.1-6",
+    "reviewed_on": "2026-08-24",
+    "expires": "2026-09-07",
+    "rationale": "Trixie has no fixed Perl package; PaperTrade does not construct attacker-controlled Perl regular expressions with more than 65,535 literal branches.",
+    "source": "https://security-tracker.debian.org/tracker/CVE-2026-13221"
+  },
+  {
+    "vulnerability": "CVE-2026-42496",
+    "package": "perl-base",
+    "installed_version": "5.40.1-6",
+    "reviewed_on": "2026-08-24",
+    "expires": "2026-09-07",
+    "rationale": "Debian postponed the Trixie Archive::Tar symlink fix while upstream regressions are resolved; the application does not extract caller-supplied archives through Perl Archive::Tar.",
+    "source": "https://security-tracker.debian.org/tracker/CVE-2026-42496"
+  },
+  {
+    "vulnerability": "CVE-2026-8376",
+    "package": "perl-base",
+    "installed_version": "5.40.1-6",
+    "reviewed_on": "2026-08-24",
+    "expires": "2026-09-07",
+    "rationale": "The overflow requires a 32-bit Perl build and an attacker-controlled regular expression; the production image is Linux/amd64. Debian classifies it as minor/no-DSA with no current Trixie fix.",
+    "source": "https://security-tracker.debian.org/tracker/CVE-2026-8376"
+  },
+  {
+    "vulnerability": "CVE-2026-54058",
+    "package": "python3-pil",
+    "installed_version": "11.1.0-5+deb13u4",
+    "reviewed_on": "2026-08-24",
+    "expires": "2026-09-07",
+    "rationale": "Debian Trixie marks the McIDAS AREA mmap disclosure/denial of service as minor/no-DSA and has no Trixie fix. The affected decoder is not a supported PaperTrade input path, but conversion handles untrusted files, so the exception is deliberately short.",
+    "source": "https://security-tracker.debian.org/tracker/CVE-2026-54058"
+  }
+]

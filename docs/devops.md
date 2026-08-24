@@ -93,6 +93,24 @@ GitHub-hosted Linux/amd64 runner for every runtime-input change, once a week,
 and on manual dispatch. It scans the exact built image with digest-pinned
 Trivy `0.73.0`, retains the JSON report, and rejects any critical occurrence
 or any high occurrence for which the distribution publishes a fixed version.
+An unfixable critical can pass only when its exact CVE, binary package, and
+installed version appear in
+`.github/security/trivy-critical-allowlist.json` with a current review,
+Debian-tracker source, risk rationale, and unexpired deadline. New, expired,
+stale, or newly fixable criticals fail the build. Exception records are short:
+the initial Debian Trixie set expires on `2026-09-07`, so a weekly scan cannot
+turn a temporary upstream wait into permanent acceptance.
+
+The 2026-08-24 review accepted eight such occurrences for at most fourteen
+days. Debian classifies the GLib, Mbed TLS, libxml2, Perl Archive::Tar, 32-bit
+Perl regex, and Pillow findings as minor/no-DSA or postponed in Trixie. The
+runtime does not expose the affected D-Bus introspection, Mbed TLS termination,
+Perl archive extraction, or enormous/32-bit Perl regex paths. PaperTrade does
+process untrusted documents, so the libxml2 and Pillow exceptions remain
+deliberately short even though their specific XML and McIDAS AREA paths are not
+supported application inputs. Remove an exception as soon as its finding
+disappears; the gate rejects a stale record rather than silently accumulating
+waivers.
 
 The scanner gate runs outside the production cluster. This keeps large
 LibreOffice and Calibre rebuild downloads off the Evans Creek Starlink links

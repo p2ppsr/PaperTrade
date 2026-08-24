@@ -3,6 +3,8 @@ name: Runtime Image Security
 on:
   pull_request:
     paths:
+      - .github/scripts/enforce-image-security.sh
+      - .github/security/trivy-critical-allowlist.json
       - .github/workflows/image-security.yml
       - Dockerfile
       - Dockerfile.runtime-base
@@ -12,6 +14,8 @@ on:
     branches:
       - master
     paths:
+      - .github/scripts/enforce-image-security.sh
+      - .github/security/trivy-critical-allowlist.json
       - .github/workflows/image-security.yml
       - Dockerfile
       - Dockerfile.runtime-base
@@ -59,22 +63,7 @@ jobs:
             --output /workspace/trivy-image.json \
             papertrade:security-candidate
       - name: Enforce the production image policy
-        run: |
-          set -euo pipefail
-          critical="$(jq '[.Results[]?.Vulnerabilities[]? | select(.Severity == "CRITICAL")] | length' trivy-image.json)"
-          high="$(jq '[.Results[]?.Vulnerabilities[]? | select(.Severity == "HIGH")] | length' trivy-image.json)"
-          fixable_high="$(jq '[.Results[]?.Vulnerabilities[]? | select(.Severity == "HIGH" and (.FixedVersion // "") != "")] | length' trivy-image.json)"
-          {
-            echo "### PaperTrade runtime image security"
-            echo
-            echo "- Critical occurrences: ${critical}"
-            echo "- High occurrences: ${high}"
-            echo "- Fixable high occurrences: ${fixable_high}"
-          } >> "${GITHUB_STEP_SUMMARY}"
-          if [[ "${critical}" -ne 0 || "${fixable_high}" -ne 0 ]]; then
-            echo "Runtime image policy failed: critical=${critical} fixable_high=${fixable_high}" >&2
-            exit 1
-          fi
+        run: .github/scripts/enforce-image-security.sh
       - name: Retain the scanner report
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
