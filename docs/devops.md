@@ -85,3 +85,16 @@ The workflow accepts an optional `source_sha` and a `build_runtime_base` switch.
 Keep `build_runtime_base=false` for normal deploys. Set it to `true` only after
 reviewing changes to `Dockerfile.runtime-base`, Node major versions, or document
 conversion dependencies.
+
+## Runtime image security
+
+`.github/workflows/image-security.yml` builds the complete runtime image on a
+GitHub-hosted Linux/amd64 runner for every runtime-input change, once a week,
+and on manual dispatch. It scans the exact built image with digest-pinned
+Trivy `0.73.0`, retains the JSON report, and rejects any critical occurrence
+or any high occurrence for which the distribution publishes a fixed version.
+
+The scanner gate runs outside the production cluster. This keeps large
+LibreOffice and Calibre rebuild downloads off the Evans Creek Starlink links
+and prevents a security candidate build from competing with production pods.
+The production deploy remains a separate, explicitly dispatched workflow.
