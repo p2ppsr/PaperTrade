@@ -1,0 +1,73 @@
+name: Runtime Image Security
+
+on:
+  pull_request:
+    paths:
+      - .github/scripts/enforce-image-security.sh
+      - .github/security/trivy-critical-allowlist.json
+      - .github/workflows/image-security.yml
+      - Dockerfile
+      - Dockerfile.runtime-base
+      - package.json
+      - package-lock.json
+  push:
+    branches:
+      - master
+    paths:
+      - .github/scripts/enforce-image-security.sh
+      - .github/security/trivy-critical-allowlist.json
+      - .github/workflows/image-security.yml
+      - Dockerfile
+      - Dockerfile.runtime-base
+      - package.json
+      - package-lock.json
+  schedule:
+    - cron: "41 11 * * 2"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  scan:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - name: Build current runtime base
+        run: |
+          set -euo pipefail
+          docker build \
+            --file Dockerfile.runtime-base \
+            --tag papertrade-runtime-base:security-candidate \
+            .
+      - name: Build current application image
+        run: |
+          set -euo pipefail
+          docker build \
+            --build-arg RUNTIME_BASE_IMAGE=papertrade-runtime-base:security-candidate \
+            --build-arg VITE_APP_VERSION="${GITHUB_SHA}" \
+            --file Dockerfile \
+            --tag papertrade:security-candidate \
+            .
+      - name: Scan the exact candidate image
+        run: |
+          set -euo pipefail
+          docker run --rm \
+            --volume /var/run/docker.sock:/var/run/docker.sock \
+            --volume "${GITHUB_WORKSPACE}:/workspace" \
+            aquasec/trivy:0.73.0@sha256:7cced7cae583819fc7806d4cbc0dbbc7cad18b99f7d3e235192e6da8c091045c \
+            image \
+            --scanners vuln \
+            --format json \
+            --output /workspace/trivy-image.json \
+            papertrade:security-candidate
+      - name: Enforce the production image policy
+        run: .github/scripts/enforce-image-security.sh
+      - name: Retain the scanner report
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: papertrade-trivy-${{ github.sha }}
+          path: trivy-image.json
+          if-no-files-found: warn
