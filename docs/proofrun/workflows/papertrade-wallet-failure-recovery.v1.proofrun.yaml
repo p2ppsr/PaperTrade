@@ -1,0 +1,223 @@
+apiVersion: proofrun.dev/v1
+kind: Workflow
+metadata:
+  id: papertrade-wallet-failure-recovery
+  name: PaperTrade wallet missing, denied, timeout, and recovery
+  version: 1.0.0
+  description: A reader who tries to continue past page 1 without a supported wallet, denies a wallet request, or experiences a wallet timeout.
+  labels:
+    migration: proofrunVersion-1
+    repository: p2ppsr/PaperTrade
+    category: recovery
+target:
+  type: web
+  url: https://papertrade.metanet.app
+  environment: production
+matrix:
+  maxCases: 7
+  exclude:
+    - {}
+  include:
+    - agent: openai-computer
+      profile: customer.impatient-newcomer@1.0.0
+      accessibility: standard
+      device: device.chromium-desktop@1.0.0
+      legacyDesktopBrowser: chrome
+      legacyMobileWallets: metanet-explorer-android
+      legacyNetworks: mainnet
+    - agent: openai-computer
+      profile: customer.impatient-newcomer@1.0.0
+      accessibility: standard
+      device: device.webkit-desktop@1.0.0
+      legacyDesktopBrowser: safari
+      legacyMobileWallets: metanet-explorer-android
+      legacyNetworks: mainnet
+    - agent: openai-computer
+      profile: customer.impatient-newcomer@1.0.0
+      accessibility: standard
+      device: device.webkit-mobile@1.0.0
+      legacyMobileBrowser: ios-safari
+      legacyMobileWallets: metanet-explorer-android
+      legacyNetworks: mainnet
+    - agent: openai-computer
+      profile: customer.impatient-newcomer@1.0.0
+      accessibility: standard
+      device: device.chromium-mobile@1.0.0
+      legacyMobileBrowser: android-chrome
+      legacyMobileWallets: metanet-explorer-android
+      legacyNetworks: mainnet
+    - agent: openai-computer
+      profile: customer.impatient-newcomer@1.0.0
+      accessibility: standard
+      device: device.android-emulator@1.0.0
+      legacyMobileSimulator: android-emulator
+      legacyMobileWallets: metanet-explorer-android
+      legacyNetworks: mainnet
+    - agent: openai-computer
+      profile: customer.impatient-newcomer@1.0.0
+      accessibility: standard
+      device: p2ppsr.metanet-client-macos@1.0.0
+      legacyDesktopWallet: localhost-json-api-wallet-bridge
+      legacyMobileWallets: metanet-explorer-android
+      legacyNetworks: mainnet
+    - agent: openai-computer
+      profile: customer.impatient-newcomer@1.0.0
+      accessibility: standard
+      device: p2ppsr.metanet-client-macos@1.0.0
+      legacyDesktopWallet: bsv-browser
+      legacyMobileWallets: metanet-explorer-android
+      legacyNetworks: mainnet
+capabilities:
+  - browser
+  - wallet.profile-restore
+journeys:
+  - id: recovery
+    goal: PaperTrade wallet missing, denied, timeout, and recovery
+    role: A reader who tries to continue past page 1 without a supported wallet, denies a wallet request, or experiences a wallet timeout.
+    maxActions: 24
+    maxSeconds: 90
+    steps:
+      - id: missing-wallet-browser
+        instruction: Open page 2 in a clean browser with no supported wallet substrate.
+        expected: "UI: The page does not spin indefinitely. UI: The app explains that a BRC100-compatible wallet is needed. UI: The app offers useful next actions such as reading page 1, opening Help, or getting a supported wallet. Domain: No entitlement, payment, or ledger entry is created. Telemetry: reader.paid_page_access_started or wallet attempt telemetry may emit, followed by reader.paid_page_failed and/or wallet.action_failed."
+        evidence:
+          - screenshot
+          - trace
+          - log
+          - metric
+        onFailure: stop
+      - id: deny-wallet-prompt
+        instruction: After recording or resetting the PaperTrade wallet permission baseline, open page 2 in a supported wallet browser or bridge and deny/cancel the wallet prompt.
+        expected: "UI: The app returns to a clear recoverable failure state. UI: The user can retry or return to page 1. UI: The UI does not say the page is unlocked. Wallet: The permission baseline proves no relevant standing PaperTrade payment, basket, protocol, PACT, certificate, or manifest-derived permission could auto-complete the action, or the branch is marked blocked. Wallet: The wallet reports denial/cancel without submitting payment. Telemetry: wallet.action_failed and reader.paid_page_failed are emitted with safe failure context."
+        evidence:
+          - screenshot
+          - trace
+          - log
+          - metric
+        onFailure: stop
+      - id: timeout-wallet-request
+        instruction: Use a controlled unavailable wallet bridge, simulator state, or network block to cause a wallet timeout without approving payment.
+        expected: "UI: The app exits pending state within the documented timeout. UI: The message distinguishes timeout from missing wallet when possible. UI: The app does not keep a stale overlay or frozen control. Telemetry: wallet.request_failed or wallet.action_failed is emitted with timeout context."
+        evidence:
+          - screenshot
+          - trace
+          - log
+          - metric
+        onFailure: stop
+      - id: recover-with-valid-wallet
+        instruction: Restore the supported wallet substrate and retry only if the operator approves a spend under the paid-page purchase flow; otherwise retry should reach prompt without charging.
+        expected: "UI: Retry starts a fresh wallet request and does not reuse stale failure state. UI: The reader can return to page 1 and continue browsing. Domain: No payment occurs unless the operator explicitly continues under the paid-page purchase ProofRun."
+        evidence:
+          - screenshot
+          - trace
+        onFailure: stop
+assertions:
+  - id: uiappearance-1
+    type: visual
+    severity: fail
+    statement: Failure states fit mobile and desktop layouts without clipped wallet-help text or hidden buttons.
+  - id: uiappearance-2
+    type: visual
+    severity: fail
+    statement: Retry, page 1, help, and wallet setup actions remain visible and tappable.
+  - id: audienceintuition-1
+    type: agent
+    severity: fail
+    statement: The target reader can understand whether the problem is missing wallet, denied request, timeout, or retryable wallet connection.
+  - id: audienceintuition-2
+    type: agent
+    severity: fail
+    statement: The app avoids implementation-only errors as primary user text.
+  - id: customertrust-1
+    type: security
+    severity: fail
+    statement: The reader is never left wondering whether a payment happened.
+  - id: customertrust-2
+    type: security
+    severity: fail
+    statement: The app does not invite blind repeated clicks while a payment may be pending.
+  - id: flowsuccess-1
+    type: oracle
+    severity: fail
+    statement: Each failure branch produces no entitlement, no author ledger credit, and no platform commission.
+  - id: flowsuccess-2
+    type: oracle
+    severity: fail
+    statement: Recovery from a failure starts from clean UI state.
+  - id: telemetryobservability-1
+    type: oracle
+    severity: fail
+    statement: Failure telemetry is distinguishable by cause where available.
+  - id: telemetryobservability-2
+    type: oracle
+    severity: fail
+    statement: Logs and telemetry contain no raw auth signatures, raw transactions, cookies, JWTs, private keys, or seed material.
+  - id: reliabilityrepeatability-1
+    type: oracle
+    severity: fail
+    statement: Missing-wallet and denial branches can be repeated from a clean session.
+  - id: reliabilityrepeatability-2
+    type: oracle
+    severity: fail
+    statement: Timeout branch documents the exact simulator/bridge condition used.
+  - id: performance-1
+    type: performance
+    severity: fail
+    statement: Missing-wallet guidance appears <= 10s.
+  - id: performance-2
+    type: performance
+    severity: fail
+    statement: Denied prompt recovery appears <= 15s.
+  - id: performance-3
+    type: performance
+    severity: fail
+    statement: Timeout recovery appears within the product timeout and never exceeds 45s without a progress state.
+  - id: required-state-1
+    type: oracle
+    severity: fail
+    statement: A clean non-wallet browser context is available.
+    tags:
+      - migrated-preflight
+  - id: required-state-2
+    type: oracle
+    severity: fail
+    statement: A wallet substrate that can deny/cancel a prompt is available for denial testing, or the branch is marked blocked.
+    tags:
+      - migrated-preflight
+  - id: required-state-3
+    type: oracle
+    severity: fail
+    statement: The wallet permission baseline for papertrade.metanet.app is captured before the denial/timeout branches, including payments/spending, baskets, grouped protocols, PACT permissions, certificate access, and manifest-derived grants that may affect page access.
+    tags:
+      - migrated-preflight
+  - id: required-state-4
+    type: oracle
+    severity: fail
+    statement: For zero-spend branches, existing PaperTrade permissions that could auto-complete paid page access are revoked, or an isolated wallet/profile with no relevant PaperTrade permission is used before opening an unowned paid page.
+    tags:
+      - migrated-preflight
+  - id: required-state-5
+    type: oracle
+    severity: fail
+    statement: A controlled timeout or unavailable wallet bridge can be created without approving payment, or the branch is marked blocked.
+    tags:
+      - migrated-preflight
+  - id: required-state-6
+    type: oracle
+    severity: fail
+    statement: The selected publication has a paid page 2.
+    tags:
+      - migrated-preflight
+policy:
+  unsafeContent: stop
+  highImpactActions: deny
+  allowedHosts:
+    - papertrade.metanet.app
+  spendLimit: 0
+  warnExitCode: 0
+remediation:
+  mode: manual
+  allowed: true
+  proposalOnly: true
+  requiredApprovers: 1
+uses: []

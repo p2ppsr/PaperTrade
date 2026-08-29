@@ -1,0 +1,195 @@
+apiVersion: proofrun.dev/v1
+kind: Workflow
+metadata:
+  id: papertrade-author-submission-preview
+  name: PaperTrade author submission and preview
+  version: 1.0.0
+  description: An author who wants to publish writing, preview rendered pages, and eventually earn from reader purchases.
+  labels:
+    migration: proofrunVersion-1
+    repository: p2ppsr/PaperTrade
+    category: publish
+target:
+  type: web
+  url: https://papertrade.metanet.app
+  environment: production
+matrix:
+  maxCases: 3
+  exclude:
+    - {}
+  include:
+    - agent: openai-computer
+      profile: customer.domain-expert@1.0.0
+      accessibility: standard
+      device: device.chromium-desktop@1.0.0
+      legacyDesktopBrowser: chrome
+      legacyMobileWallets: metanet-explorer-android
+      legacyServerWallets: papertrade-server-wallet
+      legacyNetworks: mainnet
+    - agent: openai-computer
+      profile: customer.domain-expert@1.0.0
+      accessibility: standard
+      device: p2ppsr.metanet-client-macos@1.0.0
+      legacyDesktopWallet: localhost-json-api-wallet-bridge
+      legacyMobileWallets: metanet-explorer-android
+      legacyServerWallets: papertrade-server-wallet
+      legacyNetworks: mainnet
+    - agent: openai-computer
+      profile: customer.domain-expert@1.0.0
+      accessibility: standard
+      device: p2ppsr.metanet-client-macos@1.0.0
+      legacyDesktopWallet: bsv-browser
+      legacyMobileWallets: metanet-explorer-android
+      legacyServerWallets: papertrade-server-wallet
+      legacyNetworks: mainnet
+capabilities:
+  - browser
+  - wallet.profile-restore
+journeys:
+  - id: publish
+    goal: PaperTrade author submission and preview
+    role: An author who wants to publish writing, preview rendered pages, and eventually earn from reader purchases.
+    maxActions: 30
+    maxSeconds: 120
+    steps:
+      - id: open-author-workspace
+        instruction: Open /author with the approved author wallet substrate.
+        expected: "UI: The Author workspace explains publishing status, balance, publications, and upload controls. UI: If wallet auth is needed, the app explains why before requesting approval. Telemetry: page.view is emitted for /author."
+        evidence:
+          - screenshot
+          - trace
+          - log
+          - metric
+        onFailure: stop
+      - id: authenticate-author
+        instruction: Approve the wallet auth/access request required to load the author workspace.
+        expected: "UI: The workspace loads without raw identity keys as the main reader-facing language. UI: The author can tell which account is active. Wallet: Auth succeeds without payment. Telemetry: wallet.prompt_shown and wallet.action_succeeded are emitted if auth is required."
+        evidence:
+          - screenshot
+          - trace
+          - log
+          - metric
+        onFailure: stop
+      - id: create-publication
+        instruction: Enter ProofRun title/description metadata and upload the public-safe multi-page fixture.
+        expected: "UI: The upload process gives progress or clear processing state. UI: The author sees validation errors for unsupported or too-short files. UI: Successful processing shows page count and preview/read action. Domain: The server creates a publication associated with the author identity. Domain: Rendered pages exist for preview. Telemetry: author.publication_submitted or author.publication_published is emitted according to current mode."
+        evidence:
+          - screenshot
+          - trace
+          - log
+          - metric
+        onFailure: stop
+      - id: preview-rendered-pages
+        instruction: Open /author/read/<publicationId>/1 and at least one additional rendered preview page.
+        expected: "UI: Preview pages render as readable images. UI: Back to author action is visible. Domain: Preview access works for the author before public reader access."
+        evidence:
+          - screenshot
+          - trace
+          - metric
+        onFailure: stop
+      - id: verify-publication-state
+        instruction: Inspect UI, API if available, telemetry, and logs for the new publication.
+        expected: "Domain: Publication status matches current mode: submitted/review if review is required, published if direct publishing is enabled. Domain: No server log errors or secret-shaped values appear. Telemetry: Author publication event is queryable with safe publication context."
+        evidence:
+          - screenshot
+          - trace
+          - log
+        onFailure: stop
+assertions:
+  - id: uiappearance-1
+    type: visual
+    severity: fail
+    statement: Author workspace, upload form, progress state, publication list, and preview pages fit desktop and wallet browser layouts.
+  - id: uiappearance-2
+    type: visual
+    severity: fail
+    statement: File processing state does not look frozen during conversion.
+  - id: audienceintuition-1
+    type: agent
+    severity: fail
+    statement: An author can understand what to upload, what happens next, and whether the work is live or awaiting review.
+  - id: audienceintuition-2
+    type: agent
+    severity: fail
+    statement: Wallet auth language is understandable and separate from payment language.
+  - id: customertrust-1
+    type: security
+    severity: fail
+    statement: The author receives clear confirmation after upload/submission.
+  - id: customertrust-2
+    type: security
+    severity: fail
+    statement: The app does not imply earnings or publication before the server state supports it.
+  - id: flowsuccess-1
+    type: oracle
+    severity: fail
+    statement: The submitted publication is associated with the author identity and has rendered preview pages.
+  - id: flowsuccess-2
+    type: oracle
+    severity: fail
+    statement: Publication status, preview access, and telemetry agree.
+  - id: telemetryobservability-1
+    type: oracle
+    severity: fail
+    statement: author.publication_submitted or author.publication_published is visible with source papertrade and safe context.
+  - id: telemetryobservability-2
+    type: oracle
+    severity: fail
+    statement: Upload/conversion failures are visible in UI and logs without secret leakage.
+  - id: reliabilityrepeatability-1
+    type: oracle
+    severity: fail
+    statement: The same public-safe fixture can be reused with a unique run id.
+  - id: reliabilityrepeatability-2
+    type: oracle
+    severity: fail
+    statement: Cleanup/unpublish path is documented if production state remains.
+  - id: performance-1
+    type: performance
+    severity: fail
+    statement: Author workspace first meaningful content <= 3s.
+  - id: performance-2
+    type: performance
+    severity: fail
+    statement: Wallet auth approval to workspace <= 10s.
+  - id: performance-3
+    type: performance
+    severity: fail
+    statement: Fixture processing completes <= 90s or is marked warn with server timing evidence.
+  - id: required-state-1
+    type: oracle
+    severity: fail
+    statement: The author wallet is available and approved for production test publication activity.
+    tags:
+      - migrated-preflight
+  - id: required-state-2
+    type: oracle
+    severity: fail
+    statement: The fixture file has at least 5 pages after conversion and contains no sensitive text.
+    tags:
+      - migrated-preflight
+  - id: required-state-3
+    type: oracle
+    severity: fail
+    statement: The operator knows whether the current mode is private_publish or public_submissions.
+    tags:
+      - migrated-preflight
+  - id: required-state-4
+    type: oracle
+    severity: fail
+    statement: Cleanup responsibility is explicit before submission.
+    tags:
+      - migrated-preflight
+policy:
+  unsafeContent: stop
+  highImpactActions: require-approval
+  allowedHosts:
+    - papertrade.metanet.app
+  spendLimit: 0
+  warnExitCode: 0
+remediation:
+  mode: manual
+  allowed: true
+  proposalOnly: true
+  requiredApprovers: 1
+uses: []

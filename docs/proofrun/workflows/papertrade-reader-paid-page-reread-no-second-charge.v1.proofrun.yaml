@@ -1,0 +1,190 @@
+apiVersion: proofrun.dev/v1
+kind: Workflow
+metadata:
+  id: papertrade-reader-paid-page-reread-no-second-charge
+  name: PaperTrade paid page reread and no second charge
+  version: 1.0.0
+  description: A returning reader who already paid for a page and expects access to persist without being charged again.
+  labels:
+    migration: proofrunVersion-1
+    repository: p2ppsr/PaperTrade
+    category: redeem
+target:
+  type: web
+  url: https://papertrade.metanet.app
+  environment: production
+matrix:
+  maxCases: 4
+  exclude:
+    - {}
+  include:
+    - agent: openai-computer
+      profile: customer.impatient-newcomer@1.0.0
+      accessibility: standard
+      device: device.chromium-desktop@1.0.0
+      legacyDesktopBrowser: chrome
+      legacyMobileWallets: metanet-explorer-android
+      legacyServerWallets: papertrade-server-wallet
+      legacyNetworks: mainnet
+    - agent: openai-computer
+      profile: customer.impatient-newcomer@1.0.0
+      accessibility: standard
+      device: device.android-emulator@1.0.0
+      legacyMobileSimulator: android-emulator
+      legacyMobileWallets: metanet-explorer-android
+      legacyServerWallets: papertrade-server-wallet
+      legacyNetworks: mainnet
+    - agent: openai-computer
+      profile: customer.impatient-newcomer@1.0.0
+      accessibility: standard
+      device: p2ppsr.metanet-client-macos@1.0.0
+      legacyDesktopWallet: localhost-json-api-wallet-bridge
+      legacyMobileWallets: metanet-explorer-android
+      legacyServerWallets: papertrade-server-wallet
+      legacyNetworks: mainnet
+    - agent: openai-computer
+      profile: customer.impatient-newcomer@1.0.0
+      accessibility: standard
+      device: p2ppsr.metanet-client-macos@1.0.0
+      legacyDesktopWallet: bsv-browser
+      legacyMobileWallets: metanet-explorer-android
+      legacyServerWallets: papertrade-server-wallet
+      legacyNetworks: mainnet
+capabilities:
+  - browser
+  - wallet.profile-restore
+journeys:
+  - id: redeem
+    goal: PaperTrade paid page reread and no second charge
+    role: A returning reader who already paid for a page and expects access to persist without being charged again.
+    maxActions: 24
+    maxSeconds: 90
+    steps:
+      - id: open-owned-page-directly
+        instruction: Open the deep link for the already-owned paid page, such as /read/<publicationId>/2, in the same wallet/browser substrate.
+        expected: "UI: The app loads the owned page or asks only for identity/auth needed to prove ownership. UI: The app does not present wording that suggests a new charge is required. Telemetry: page.view is emitted for the deep link."
+        evidence:
+          - screenshot
+          - trace
+          - log
+          - metric
+        onFailure: stop
+      - id: approve-auth-if-needed
+        instruction: Approve any identity/auth wallet request required for ownership lookup, but do not approve any new payment.
+        expected: "UI: The wallet request wording is distinguishable from a payment request. UI: The app explains that it is checking access or loading the owned page. Wallet: No spend or payment request is made. Wallet: If a prompt appears, it is an auth/access request consistent with rereading owned content. Telemetry: reader.paid_page_access_started may appear as a neutral access-check event. Telemetry: wallet.prompt_shown and wallet.action_succeeded may appear, but no reader.paid_page_unlock_started should be emitted."
+        evidence:
+          - screenshot
+          - trace
+          - log
+          - metric
+        onFailure: stop
+      - id: verify-owned-page-renders
+        instruction: Wait for the paid page to render, then reload the page.
+        expected: "UI: The page image renders after direct open and after reload. UI: No stale wallet-help, timeout, or install-wallet copy remains after success. Domain: The server returns access as owned or already entitled, not newly paid. Domain: No new page_entitlements duplicate, ledger debit, or author credit is created. Telemetry: The success path is visible without a duplicate conversion/payment signal."
+        evidence:
+          - screenshot
+          - trace
+          - log
+          - metric
+        onFailure: stop
+      - id: exercise-navigation-history
+        instruction: Use browser back, forward, and a fresh tab/deep link to return to the owned page.
+        expected: "UI: Navigation remains responsive and does not show a frozen loading state. UI: The reader can return to the publication detail and back to the paid page. Domain: No new charge is attempted in any navigation path."
+        evidence:
+          - screenshot
+          - trace
+        onFailure: stop
+assertions:
+  - id: uiappearance-1
+    type: visual
+    severity: fail
+    statement: Owned-page reread UI is stable on required desktop/mobile/wallet substrate.
+  - id: uiappearance-2
+    type: visual
+    severity: fail
+    statement: History, reload, and deep link states do not leave overlapping wallet-help or loading messages.
+  - id: audienceintuition-1
+    type: agent
+    severity: fail
+    statement: The returning reader can tell access is already owned.
+  - id: audienceintuition-2
+    type: agent
+    severity: fail
+    statement: Any wallet prompt is understandable as identity/access, not a second purchase.
+  - id: customertrust-1
+    type: security
+    severity: fail
+    statement: The flow does not create duplicate-charge anxiety.
+  - id: customertrust-2
+    type: security
+    severity: fail
+    statement: There is no ambiguous retry button that could accidentally repurchase the same page.
+  - id: flowsuccess-1
+    type: oracle
+    severity: fail
+    statement: The owned page renders by direct link, reload, and history navigation.
+  - id: flowsuccess-2
+    type: oracle
+    severity: fail
+    statement: Before/after checks show no second charge, duplicate entitlement, or duplicate author ledger credit.
+  - id: telemetryobservability-1
+    type: oracle
+    severity: fail
+    statement: Events for reread are queryable and distinguish owned access from a fresh paid conversion.
+  - id: telemetryobservability-2
+    type: oracle
+    severity: fail
+    statement: If the telemetry model cannot distinguish owned reread from paid unlock, outcome must be warn and the run record must file a follow-up.
+  - id: reliabilityrepeatability-1
+    type: oracle
+    severity: fail
+    statement: The flow passes in a clean browser context with the same wallet identity.
+  - id: reliabilityrepeatability-2
+    type: oracle
+    severity: fail
+    statement: The run record documents the entitlement source without exposing private wallet material.
+  - id: performance-1
+    type: performance
+    severity: fail
+    statement: Owned-page render after auth/access check <= 10s.
+  - id: performance-2
+    type: performance
+    severity: fail
+    statement: Reload and history navigation should not exceed paid-flow thresholds.
+  - id: required-state-1
+    type: oracle
+    severity: fail
+    statement: The selected reader identity has a prior entitlement for the selected publication/page.
+    tags:
+      - migrated-preflight
+  - id: required-state-2
+    type: oracle
+    severity: fail
+    statement: Spend cap for this flow is zero because no new payment should occur.
+    tags:
+      - migrated-preflight
+  - id: required-state-3
+    type: oracle
+    severity: fail
+    statement: Wallet substrate is available to authenticate the returning reader if required.
+    tags:
+      - migrated-preflight
+  - id: required-state-4
+    type: oracle
+    severity: fail
+    statement: The operator has a way to compare before/after telemetry and logs for duplicate paid unlock or payment attempts.
+    tags:
+      - migrated-preflight
+policy:
+  unsafeContent: stop
+  highImpactActions: require-approval
+  allowedHosts:
+    - papertrade.metanet.app
+  spendLimit: 0
+  warnExitCode: 0
+remediation:
+  mode: manual
+  allowed: true
+  proposalOnly: true
+  requiredApprovers: 1
+uses: []

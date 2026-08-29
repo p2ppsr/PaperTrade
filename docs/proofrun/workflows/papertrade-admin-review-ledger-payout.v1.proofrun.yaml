@@ -1,0 +1,235 @@
+apiVersion: proofrun.dev/v1
+kind: Workflow
+metadata:
+  id: papertrade-admin-review-ledger-payout
+  name: PaperTrade admin review, ledger, and payout lifecycle
+  version: 1.0.0
+  description: An authorized PaperTrade operator validating publication review, reader purchase accounting, author balance, and payout handling.
+  labels:
+    migration: proofrunVersion-1
+    repository: p2ppsr/PaperTrade
+    category: admin
+target:
+  type: web
+  url: https://papertrade.metanet.app
+  environment: production
+matrix:
+  maxCases: 4
+  exclude:
+    - {}
+  include:
+    - agent: openai-computer
+      profile: customer.domain-expert@1.0.0
+      accessibility: standard
+      device: device.chromium-desktop@1.0.0
+      legacyDesktopBrowser: chrome
+      legacyMobileWallets: metanet-explorer-android
+      legacyServerWallets: papertrade-server-wallet
+      legacyNetworks: mainnet
+    - agent: openai-computer
+      profile: customer.domain-expert@1.0.0
+      accessibility: standard
+      device: device.android-emulator@1.0.0
+      legacyMobileSimulator: android-emulator
+      legacyMobileWallets: metanet-explorer-android
+      legacyServerWallets: papertrade-server-wallet
+      legacyNetworks: mainnet
+    - agent: openai-computer
+      profile: customer.domain-expert@1.0.0
+      accessibility: standard
+      device: p2ppsr.metanet-client-macos@1.0.0
+      legacyDesktopWallet: localhost-json-api-wallet-bridge
+      legacyMobileWallets: metanet-explorer-android
+      legacyServerWallets: papertrade-server-wallet
+      legacyNetworks: mainnet
+    - agent: openai-computer
+      profile: customer.domain-expert@1.0.0
+      accessibility: standard
+      device: p2ppsr.metanet-client-macos@1.0.0
+      legacyDesktopWallet: bsv-browser
+      legacyMobileWallets: metanet-explorer-android
+      legacyServerWallets: papertrade-server-wallet
+      legacyNetworks: mainnet
+capabilities:
+  - browser
+  - wallet.profile-restore
+journeys:
+  - id: admin
+    goal: PaperTrade admin review, ledger, and payout lifecycle
+    role: An authorized PaperTrade operator validating publication review, reader purchase accounting, author balance, and payout handling.
+    maxActions: 36
+    maxSeconds: 180
+    steps:
+      - id: authenticate-admin
+        instruction: Open /admin and approve the wallet auth/access request.
+        expected: "UI: Admin workspace loads only for the approved admin identity. UI: Admin tabs for Publications, Settings/Admins, and Payouts are visible and usable. Wallet: Auth succeeds without payment. Telemetry: page.view, wallet.prompt_shown, and wallet.action_succeeded are emitted as applicable."
+        evidence:
+          - screenshot
+          - trace
+          - log
+          - metric
+        onFailure: stop
+      - id: review-publication
+        instruction: Review the ProofRun author publication and publish, reject, unpublish, or return to review according to the planned branch.
+        expected: "UI: The admin can inspect metadata and rendered preview before changing status. UI: Status change produces clear confirmation. Domain: Publication status changes exactly once to the selected target state. Domain: Public catalog visibility matches published/unpublished status. Telemetry: One of admin.publication_submitted, admin.publication_published, admin.publication_rejected, admin.publication_unpublished, or admin.publication_returned_to_review is emitted."
+        evidence:
+          - screenshot
+          - trace
+          - log
+          - metric
+        onFailure: stop
+      - id: generate-author-balance
+        instruction: If no qualifying balance exists, run a low-value paid-page purchase against the published ProofRun publication or selected test publication.
+        expected: "UI: The reader receives the paid page after approval. Domain: Author balance increases by the expected net amount and platform commission is represented correctly. Telemetry: reader.paid_page_unlocked is emitted and can be correlated to ledger state."
+        evidence:
+          - screenshot
+          - trace
+          - log
+          - metric
+        onFailure: stop
+      - id: inspect-ledger-and-create-payout
+        instruction: Open the Payouts section, inspect author balances, and create or prepare the payout according to the spend cap and server-wallet readiness.
+        expected: "UI: Author balances are understandable and selectable. UI: Payout creation has a clear result: created, pending wallet receipt, succeeded, or actionable failure. Domain: A payout record is created only when amount, author, and server wallet balance are valid. Domain: Failed payout attempts record a safe failure reason without corrupting balance state. Telemetry: payout.created, payout.succeeded, or payout.failed is emitted according to result."
+        evidence:
+          - screenshot
+          - trace
+          - log
+          - metric
+        onFailure: stop
+      - id: author-receives-or-retries-payout
+        instruction: Open /author and complete wallet receipt for a pending payout, or verify actionable retry/support state if receipt cannot be completed.
+        expected: "UI: Author payout state is clear and does not imply funds received before wallet receipt. UI: Retry wallet receipt and payout support are visible when needed. Domain: Payout status moves to succeeded or remains pending/failed with correct reason. Wallet: If internalization succeeds, the wallet confirms receipt. Telemetry: payout.succeeded or payout.failed is emitted according to outcome."
+        evidence:
+          - screenshot
+          - trace
+          - log
+          - metric
+        onFailure: stop
+      - id: cleanup-test-state
+        instruction: Apply the documented cleanup plan for ProofRun publication/admin changes where appropriate.
+        expected: "Domain: Cleanup changes are recorded in run evidence. Domain: Financial audit records are not deleted or obscured. Telemetry: Cleanup status changes emit the appropriate admin event."
+        evidence:
+          - screenshot
+          - trace
+          - log
+        onFailure: stop
+assertions:
+  - id: uiappearance-1
+    type: visual
+    severity: fail
+    statement: Admin, payout, author, and reader states remain usable on required desktop and selected wallet/mobile substrate.
+  - id: uiappearance-2
+    type: visual
+    severity: fail
+    statement: Tabs, forms, balance rows, payout actions, and confirmations do not overlap or hide critical data.
+  - id: audienceintuition-1
+    type: agent
+    severity: fail
+    statement: An operator can understand publication status, author balances, payout readiness, and failure reasons without reading source code.
+  - id: audienceintuition-2
+    type: agent
+    severity: fail
+    statement: Authors can understand whether a payout is received, pending wallet receipt, or failed.
+  - id: customertrust-1
+    type: security
+    severity: fail
+    statement: Reader payment, author balance, platform commission, and payout state are internally consistent.
+  - id: customertrust-2
+    type: security
+    severity: fail
+    statement: No UI claims funds or publication status that the backend has not recorded.
+  - id: customertrust-3
+    type: security
+    severity: fail
+    statement: Failures explain whether the issue is server wallet funding, author wallet receipt, invalid amount, or permissions.
+  - id: flowsuccess-1
+    type: oracle
+    severity: fail
+    statement: Admin auth is enforced.
+  - id: flowsuccess-2
+    type: oracle
+    severity: fail
+    statement: Publication review action changes state exactly as intended.
+  - id: flowsuccess-3
+    type: oracle
+    severity: fail
+    statement: A reader purchase produces the expected ledger/balance effect.
+  - id: flowsuccess-4
+    type: oracle
+    severity: fail
+    statement: Payout lifecycle reaches succeeded or a correct pending/failed state with no balance corruption.
+  - id: telemetryobservability-1
+    type: oracle
+    severity: fail
+    statement: Admin publication events, paid-page conversion, and payout lifecycle events are queryable with source papertrade.
+  - id: telemetryobservability-2
+    type: oracle
+    severity: fail
+    statement: Logs and telemetry have no private keys, seed phrases, raw transactions, JWTs, cookies, raw signatures, or wallet storage secrets.
+  - id: reliabilityrepeatability-1
+    type: oracle
+    severity: fail
+    statement: The flow can be rerun with a new ProofRun publication/run id.
+  - id: reliabilityrepeatability-2
+    type: oracle
+    severity: fail
+    statement: Cleanup and audit boundaries are documented so repeated runs do not pollute production catalog.
+  - id: performance-1
+    type: performance
+    severity: fail
+    statement: Admin workspace auth to ready <= 10s.
+  - id: performance-2
+    type: performance
+    severity: fail
+    statement: Publication status action confirmation <= 15s.
+  - id: performance-3
+    type: performance
+    severity: fail
+    statement: Payout creation result <= 30s.
+  - id: performance-4
+    type: performance
+    severity: fail
+    statement: Author payout receipt or actionable failure <= 30s.
+  - id: required-state-1
+    type: oracle
+    severity: fail
+    statement: An approved admin wallet identity can access /admin.
+    tags:
+      - migrated-preflight
+  - id: required-state-2
+    type: oracle
+    severity: fail
+    statement: An approved author/test publication exists or the author submission ProofRun is run first.
+    tags:
+      - migrated-preflight
+  - id: required-state-3
+    type: oracle
+    severity: fail
+    statement: An approved reader wallet has enough funds for one low-value page purchase.
+    tags:
+      - migrated-preflight
+  - id: required-state-4
+    type: oracle
+    severity: fail
+    statement: PaperTrade server wallet has enough spendable balance for any payout branch being executed, or payout creation is expected to warn/fail with clear operator guidance.
+    tags:
+      - migrated-preflight
+  - id: required-state-5
+    type: oracle
+    severity: fail
+    statement: The exact cleanup plan is documented before making admin changes.
+    tags:
+      - migrated-preflight
+policy:
+  unsafeContent: stop
+  highImpactActions: require-approval
+  allowedHosts:
+    - papertrade.metanet.app
+  spendLimit: 250
+  warnExitCode: 0
+remediation:
+  mode: manual
+  allowed: true
+  proposalOnly: true
+  requiredApprovers: 1
+uses: []

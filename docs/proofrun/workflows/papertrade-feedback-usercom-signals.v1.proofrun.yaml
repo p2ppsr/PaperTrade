@@ -1,0 +1,187 @@
+apiVersion: proofrun.dev/v1
+kind: Workflow
+metadata:
+  id: papertrade-feedback-usercom-signals
+  name: PaperTrade feedback and UserCom signal capture
+  version: 1.0.0
+  description: A reader, author, or evaluator who needs to send feedback or support context from a real PaperTrade surface.
+  labels:
+    migration: proofrunVersion-1
+    repository: p2ppsr/PaperTrade
+    category: feedback
+target:
+  type: web
+  url: https://papertrade.metanet.app
+  environment: production
+matrix:
+  maxCases: 5
+  exclude:
+    - {}
+  include:
+    - agent: openai-computer
+      profile: customer.impatient-newcomer@1.0.0
+      accessibility: standard
+      device: device.chromium-desktop@1.0.0
+      legacyDesktopBrowser: chrome
+      legacyNetworks: mainnet
+    - agent: openai-computer
+      profile: customer.impatient-newcomer@1.0.0
+      accessibility: standard
+      device: device.webkit-desktop@1.0.0
+      legacyDesktopBrowser: safari
+      legacyNetworks: mainnet
+    - agent: openai-computer
+      profile: customer.impatient-newcomer@1.0.0
+      accessibility: standard
+      device: device.webkit-mobile@1.0.0
+      legacyMobileBrowser: ios-safari
+      legacyNetworks: mainnet
+    - agent: openai-computer
+      profile: customer.impatient-newcomer@1.0.0
+      accessibility: standard
+      device: device.chromium-mobile@1.0.0
+      legacyMobileBrowser: android-chrome
+      legacyNetworks: mainnet
+    - agent: openai-computer
+      profile: customer.impatient-newcomer@1.0.0
+      accessibility: standard
+      device: device.android-emulator@1.0.0
+      legacyMobileSimulator: android-emulator
+      legacyNetworks: mainnet
+capabilities:
+  - browser
+journeys:
+  - id: feedback
+    goal: PaperTrade feedback and UserCom signal capture
+    role: A reader, author, or evaluator who needs to send feedback or support context from a real PaperTrade surface.
+    maxActions: 24
+    maxSeconds: 90
+    steps:
+      - id: open-feedback-from-newsstand
+        instruction: Open the newsstand and open the feedback UI from the primary feedback affordance.
+        expected: "UI: Feedback is discoverable without knowing internal routes. UI: The modal or panel is visually stable on desktop and mobile. UI: The user can close it without losing page context. Telemetry: feedback.opened is emitted with surface newsstand or equivalent context."
+        evidence:
+          - screenshot
+          - trace
+          - log
+          - metric
+        onFailure: stop
+      - id: submit-valid-feedback
+        instruction: Submit a public-safe ProofRun feedback message with the unique run id.
+        expected: "UI: The submit button shows immediate progress or disables safely. UI: A clear success confirmation appears. UI: The form does not duplicate-submit on repeated clicks. Domain: The UserCom feedback record contains source papertrade, surface, URL/path, tags, and sanitized context. Telemetry: feedback.submitted is emitted and UserCom /submit returns success."
+        evidence:
+          - screenshot
+          - trace
+          - log
+          - metric
+        onFailure: stop
+      - id: submit-invalid-feedback
+        instruction: Attempt an invalid submission, such as empty feedback or invalid email, without sending sensitive data.
+        expected: "UI: The user gets actionable validation feedback. UI: The failure does not clear useful entered data unexpectedly. Telemetry: feedback.failed is emitted only if the app attempts and receives a failure; client-only validation may record no backend submission."
+        evidence:
+          - screenshot
+          - trace
+          - log
+          - metric
+        onFailure: stop
+      - id: feedback-from-contextual-surfaces
+        instruction: Open feedback from Help and from a reader or wallet-help/failure context when available.
+        expected: "UI: Feedback remains discoverable when the user is confused or blocked. UI: Surface-specific context is attached without exposing private wallet material. Telemetry: feedback.opened and feedback.submitted include useful surface tags such as help, reader, or author-payout."
+        evidence:
+          - screenshot
+          - trace
+          - log
+        onFailure: stop
+assertions:
+  - id: uiappearance-1
+    type: visual
+    severity: fail
+    statement: Feedback UI fits desktop and mobile without clipped text, hidden fields, or inaccessible close/submit buttons.
+  - id: uiappearance-2
+    type: visual
+    severity: fail
+    statement: Success and failure states are visually distinct.
+  - id: audienceintuition-1
+    type: agent
+    severity: fail
+    statement: A user can find feedback from likely confusion points.
+  - id: audienceintuition-2
+    type: agent
+    severity: fail
+    statement: Field labels and validation messages are plain language.
+  - id: customertrust-1
+    type: security
+    severity: fail
+    statement: The app confirms receipt and does not silently swallow feedback.
+  - id: customertrust-2
+    type: security
+    severity: fail
+    statement: The user is not asked for wallet approval to send ordinary feedback.
+  - id: flowsuccess-1
+    type: oracle
+    severity: fail
+    statement: A valid feedback submission reaches UserCom and is queryable by run id.
+  - id: flowsuccess-2
+    type: oracle
+    severity: fail
+    statement: Invalid submission does not create a misleading success state.
+  - id: telemetryobservability-1
+    type: oracle
+    severity: fail
+    statement: feedback.opened, feedback.submitted, and feedback.failed where applicable are visible with source papertrade.
+  - id: telemetryobservability-2
+    type: oracle
+    severity: fail
+    statement: Context includes route, surface, release/session context, and no secret-shaped values.
+  - id: reliabilityrepeatability-1
+    type: oracle
+    severity: fail
+    statement: The valid submission can be repeated with a unique run id.
+  - id: reliabilityrepeatability-2
+    type: oracle
+    severity: fail
+    statement: The form prevents accidental duplicate submissions in a single attempt.
+  - id: performance-1
+    type: performance
+    severity: fail
+    statement: Feedback UI opens <= 2s.
+  - id: performance-2
+    type: performance
+    severity: fail
+    statement: Submission confirmation appears <= 5s.
+  - id: performance-3
+    type: performance
+    severity: fail
+    statement: UserCom visibility <= 60s.
+  - id: required-state-1
+    type: oracle
+    severity: fail
+    statement: The operator has a public-safe ProofRun feedback name, email, and message.
+    tags:
+      - migrated-preflight
+  - id: required-state-2
+    type: oracle
+    severity: fail
+    statement: The feedback message includes a unique run id for UserCom correlation.
+    tags:
+      - migrated-preflight
+  - id: required-state-3
+    type: oracle
+    severity: fail
+    statement: The operator has a UserCom query path to confirm feedback.submitted and adjacent page.view or feedback.opened events.
+    tags:
+      - migrated-preflight
+policy:
+  unsafeContent: stop
+  highImpactActions: require-approval
+  allowedHosts:
+    - papertrade.metanet.app
+    - usercom.babbage.systems
+  spendLimit: 0
+  warnExitCode: 0
+remediation:
+  mode: manual
+  allowed: true
+  proposalOnly: true
+  requiredApprovers: 1
+uses: []
