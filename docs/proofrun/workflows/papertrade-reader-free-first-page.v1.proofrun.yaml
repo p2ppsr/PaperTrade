@@ -1,0 +1,201 @@
+apiVersion: proofrun.dev/v1
+kind: Workflow
+metadata:
+  id: papertrade-reader-free-first-page
+  name: PaperTrade reader discovery to first free page
+  version: 1.0.0
+  description: A new reader who is curious about PaperTrade but may not yet understand BSV, wallets, or pay-per-page publishing.
+  labels:
+    migration: proofrunVersion-1
+    repository: p2ppsr/PaperTrade
+    category: discover
+target:
+  type: web
+  url: https://papertrade.metanet.app
+  environment: production
+matrix:
+  maxCases: 6
+  exclude:
+    - {}
+  include:
+    - agent: openai-computer
+      profile: customer.impatient-newcomer@1.0.0
+      accessibility: standard
+      device: device.chromium-desktop@1.0.0
+      legacyDesktopBrowser: chrome
+      legacyNetworks: mainnet
+    - agent: openai-computer
+      profile: customer.impatient-newcomer@1.0.0
+      accessibility: standard
+      device: device.webkit-desktop@1.0.0
+      legacyDesktopBrowser: safari
+      legacyNetworks: mainnet
+    - agent: openai-computer
+      profile: customer.impatient-newcomer@1.0.0
+      accessibility: standard
+      device: device.webkit-mobile@1.0.0
+      legacyMobileBrowser: ios-safari
+      legacyNetworks: mainnet
+    - agent: openai-computer
+      profile: customer.impatient-newcomer@1.0.0
+      accessibility: standard
+      device: device.chromium-mobile@1.0.0
+      legacyMobileBrowser: android-chrome
+      legacyNetworks: mainnet
+    - agent: openai-computer
+      profile: customer.impatient-newcomer@1.0.0
+      accessibility: standard
+      device: device.ios-simulator@1.0.0
+      legacyMobileSimulator: ios-simulator
+      legacyNetworks: mainnet
+    - agent: openai-computer
+      profile: customer.impatient-newcomer@1.0.0
+      accessibility: standard
+      device: device.android-emulator@1.0.0
+      legacyMobileSimulator: android-emulator
+      legacyNetworks: mainnet
+capabilities:
+  - browser
+journeys:
+  - id: discover
+    goal: PaperTrade reader discovery to first free page
+    role: A new reader who is curious about PaperTrade but may not yet understand BSV, wallets, or pay-per-page publishing.
+    maxActions: 24
+    maxSeconds: 90
+    steps:
+      - id: open-newsstand
+        instruction: Open https://papertrade.metanet.app/ in a clean browser context.
+        expected: "UI: The page title or H1 clearly identifies PaperTrade. UI: The first viewport explains the reading value before wallet mechanics. UI: Navigation includes Newsstand, Help, Author, and Admin without crowding or clipping. UI: The publication grid renders real works, not empty demo placeholders. Telemetry: page.view is emitted with source papertrade and surface newsstand or equivalent route context. Telemetry: newsstand.loaded is emitted after publications render."
+        evidence:
+          - screenshot
+          - trace
+          - log
+          - metric
+        onFailure: stop
+      - id: inspect-catalog
+        instruction: Scan the first screen and at least the first three publication cards.
+        expected: "UI: Each visible card has a readable title, human author name, short description or metadata, price/page context, page count, and a visible action to read. UI: Cards are tappable/clickable without text overlap at desktop and mobile widths. UI: Search or browse controls do not obscure content or resize the layout unexpectedly. Domain: Rendered publication cards agree with /api/publications for title, id, author, page count, and published status."
+        evidence:
+          - screenshot
+          - trace
+        onFailure: stop
+      - id: open-publication-detail
+        instruction: Open the detail page for the first catalog publication.
+        expected: "UI: The detail page makes the work, author, page count, and start-reading action obvious. UI: The user can understand that page 1 is free before any paid page is requested. Telemetry: publication.view is emitted with publicationId and safe route context."
+        evidence:
+          - screenshot
+          - trace
+          - log
+          - metric
+        onFailure: stop
+      - id: read-page-one-free
+        instruction: Open page 1 from the publication detail page.
+        expected: "UI: Page 1 renders as a readable page image. UI: The reader has obvious navigation to continue, return, or get help. UI: No wallet setup prompt appears before page 1 content. Domain: Direct HTTP for /api/publications/<id>/pages/1 returns a PNG response with X-PaperTrade-Page-Access: free. Telemetry: reader.first_page_loaded is emitted with publicationId and pageNumber 1."
+        evidence:
+          - screenshot
+          - trace
+          - log
+          - metric
+        onFailure: stop
+assertions:
+  - id: uiappearance-1
+    type: visual
+    severity: fail
+    statement: Desktop 1440x900, tablet 768x1024, and mobile 390x844 viewports have no horizontal overflow, overlapping text, hidden primary actions, or clipped navigation.
+  - id: uiappearance-2
+    type: visual
+    severity: fail
+    statement: Publication cards, detail hero, and reader page image use stable dimensions and do not shift after load.
+  - id: uiappearance-3
+    type: visual
+    severity: fail
+    statement: Loading and empty states are coherent if network throttling is used.
+  - id: audienceintuition-1
+    type: agent
+    severity: fail
+    statement: A non-technical reader can tell what PaperTrade is, what to click first, and that page 1 is free.
+  - id: audienceintuition-2
+    type: agent
+    severity: fail
+    statement: Wallet or BSV terminology is not required to understand the first action.
+  - id: customertrust-1
+    type: security
+    severity: fail
+    statement: The app does not ask for wallet approval before delivering the promised free page.
+  - id: customertrust-2
+    type: security
+    severity: fail
+    statement: Pricing and page-by-page continuation are visible before any paid action.
+  - id: flowsuccess-1
+    type: oracle
+    severity: fail
+    statement: Homepage, catalog API, publication detail, and page 1 all agree on the selected publication.
+  - id: flowsuccess-2
+    type: oracle
+    severity: fail
+    statement: Page 1 can be loaded from click navigation and by direct deep link.
+  - id: telemetryobservability-1
+    type: oracle
+    severity: fail
+    statement: page.view, newsstand.loaded, publication.view, and reader.first_page_loaded are queryable in UserCom or the configured signal sink.
+  - id: telemetryobservability-2
+    type: oracle
+    severity: fail
+    statement: Events include source papertrade, safe route context, release context when available, and no private wallet material.
+  - id: reliabilityrepeatability-1
+    type: oracle
+    severity: fail
+    statement: The flow passes from a clean browser context and after reload/back/forward.
+  - id: reliabilityrepeatability-2
+    type: oracle
+    severity: fail
+    statement: Running the flow twice creates no duplicate domain state because it is read-only.
+  - id: performance-1
+    type: performance
+    severity: fail
+    statement: Homepage first meaningful content <= 2s on normal network.
+  - id: performance-2
+    type: performance
+    severity: fail
+    statement: Publication detail first meaningful content <= 2s on normal network.
+  - id: performance-3
+    type: performance
+    severity: fail
+    statement: Page 1 image visible <= 3s on normal network.
+  - id: required-state-1
+    type: oracle
+    severity: fail
+    statement: Production health returns ok:true.
+    tags:
+      - migrated-preflight
+  - id: required-state-2
+    type: oracle
+    severity: fail
+    statement: The public catalog returns at least one published publication.
+    tags:
+      - migrated-preflight
+  - id: required-state-3
+    type: oracle
+    severity: fail
+    statement: The first publication has a stable id, title, authorName, pageCount, and cover or fallback cover state.
+    tags:
+      - migrated-preflight
+  - id: required-state-4
+    type: oracle
+    severity: fail
+    statement: No wallet or paid action is required for this flow.
+    tags:
+      - migrated-preflight
+policy:
+  unsafeContent: stop
+  highImpactActions: deny
+  allowedHosts:
+    - papertrade.metanet.app
+  spendLimit: 0
+  warnExitCode: 0
+remediation:
+  mode: manual
+  allowed: true
+  proposalOnly: true
+  requiredApprovers: 1
+uses: []

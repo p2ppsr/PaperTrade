@@ -1,0 +1,218 @@
+apiVersion: proofrun.dev/v1
+kind: Workflow
+metadata:
+  id: papertrade-reader-paid-page-purchase
+  name: PaperTrade reader paid page purchase
+  version: 1.0.0
+  description: A reader with a funded BRC100-compatible wallet who wants to continue reading after the free first page.
+  labels:
+    migration: proofrunVersion-1
+    repository: p2ppsr/PaperTrade
+    category: pay
+target:
+  type: web
+  url: https://papertrade.metanet.app
+  environment: production
+matrix:
+  maxCases: 4
+  exclude:
+    - {}
+  include:
+    - agent: openai-computer
+      profile: customer.impatient-newcomer@1.0.0
+      accessibility: standard
+      device: device.chromium-desktop@1.0.0
+      legacyDesktopBrowser: chrome
+      legacyMobileWallets: metanet-explorer-android
+      legacyServerWallets: papertrade-server-wallet
+      legacyNetworks: mainnet
+    - agent: openai-computer
+      profile: customer.impatient-newcomer@1.0.0
+      accessibility: standard
+      device: device.android-emulator@1.0.0
+      legacyMobileSimulator: android-emulator
+      legacyMobileWallets: metanet-explorer-android
+      legacyServerWallets: papertrade-server-wallet
+      legacyNetworks: mainnet
+    - agent: openai-computer
+      profile: customer.impatient-newcomer@1.0.0
+      accessibility: standard
+      device: p2ppsr.metanet-client-macos@1.0.0
+      legacyDesktopWallet: localhost-json-api-wallet-bridge
+      legacyMobileWallets: metanet-explorer-android
+      legacyServerWallets: papertrade-server-wallet
+      legacyNetworks: mainnet
+    - agent: openai-computer
+      profile: customer.impatient-newcomer@1.0.0
+      accessibility: standard
+      device: p2ppsr.metanet-client-macos@1.0.0
+      legacyDesktopWallet: bsv-browser
+      legacyMobileWallets: metanet-explorer-android
+      legacyServerWallets: papertrade-server-wallet
+      legacyNetworks: mainnet
+capabilities:
+  - browser
+  - wallet.profile-restore
+journeys:
+  - id: pay
+    goal: PaperTrade reader paid page purchase
+    role: A reader with a funded BRC100-compatible wallet who wants to continue reading after the free first page.
+    maxActions: 30
+    maxSeconds: 90
+    steps:
+      - id: open-free-page
+        instruction: Open a selected publication, read page 1, and click or navigate to page 2.
+        expected: "UI: The free page is visible before payment. UI: The continuation action makes it clear that the next page is paid. Telemetry: reader.first_page_loaded is emitted before paid-page events."
+        evidence:
+          - screenshot
+          - trace
+          - log
+          - metric
+        onFailure: stop
+      - id: start-paid-unlock
+        instruction: Start the page 2 unlock from the reader UI.
+        expected: "UI: The app shows immediate progress and does not appear frozen. UI: The user sees language that explains this is a wallet/payment request for unlocking the page. Telemetry: reader.paid_page_access_started is emitted with publicationId and pageNumber 2 before the access/payment request completes. Telemetry: wallet.prompt_shown is emitted when the wallet prompt is expected or displayed."
+        evidence:
+          - screenshot
+          - trace
+          - log
+          - metric
+        onFailure: stop
+      - id: approve-wallet-payment
+        instruction: Approve the wallet request for the paid page within the configured spend cap.
+        expected: "UI: The wallet prompt shows a comprehensible action and amount before approval. UI: The app remains responsive while approval is pending. Wallet: The wallet returns success for the requested BRC100/payment action. Telemetry: wallet.action_succeeded is emitted after approval."
+        evidence:
+          - screenshot
+          - trace
+          - log
+          - metric
+        onFailure: stop
+      - id: verify-paid-page
+        instruction: Wait for PaperTrade to render page 2 after approval.
+        expected: "UI: Page 2 image renders and the app gives clear success state without stale wallet-help copy. UI: Reader navigation still works after the paid page loads. Domain: The server records or recognizes an entitlement/payment for the selected reader, publication, and page. Domain: The author ledger and platform commission state are updated when applicable. Telemetry: reader.paid_page_unlocked is emitted from the client or server with safe context."
+        evidence:
+          - screenshot
+          - trace
+          - log
+          - metric
+        onFailure: stop
+      - id: verify-production-logs
+        instruction: Inspect logs and telemetry for the run window.
+        expected: "Telemetry: The paid conversion sequence is queryable: page.view, reader.first_page_loaded, reader.paid_page_access_started, wallet.prompt_shown, wallet.action_succeeded, reader.paid_page_unlocked."
+        evidence:
+          - screenshot
+          - trace
+          - log
+        onFailure: stop
+assertions:
+  - id: uiappearance-1
+    type: visual
+    severity: fail
+    statement: The paid-page path is usable at desktop and in the selected wallet/browser substrate.
+  - id: uiappearance-2
+    type: visual
+    severity: fail
+    statement: Progress, wallet, success, and reader states do not overlap or hide controls.
+  - id: audienceintuition-1
+    type: agent
+    severity: fail
+    statement: The reader can tell why the wallet opened and what page is being unlocked.
+  - id: audienceintuition-2
+    type: agent
+    severity: fail
+    statement: The app does not expose raw transaction internals as the primary explanation.
+  - id: customertrust-1
+    type: security
+    severity: fail
+    statement: The amount and consequence are clear before approval.
+  - id: customertrust-2
+    type: security
+    severity: fail
+    statement: The UI never suggests duplicate charge risk while waiting.
+  - id: customertrust-3
+    type: security
+    severity: fail
+    statement: After success, the reader can tell the paid page is available.
+  - id: flowsuccess-1
+    type: oracle
+    severity: fail
+    statement: Wallet approval, PaperTrade entitlement/payment state, page image rendering, and ledger impact agree.
+  - id: flowsuccess-2
+    type: oracle
+    severity: fail
+    statement: The selected page is not unlocked without payment unless it was already owned by the test identity.
+  - id: telemetryobservability-1
+    type: oracle
+    severity: fail
+    statement: Conversion and wallet events are queryable in UserCom or the configured sink.
+  - id: telemetryobservability-2
+    type: oracle
+    severity: fail
+    statement: Telemetry distinguishes start, prompt, success, and failure states.
+  - id: telemetryobservability-3
+    type: oracle
+    severity: fail
+    statement: Telemetry contains no private keys, signatures, BEEF payloads, cookies, JWTs, or raw transactions.
+  - id: reliabilityrepeatability-1
+    type: oracle
+    severity: fail
+    statement: A fresh selected page or fresh reader identity can repeat the run.
+  - id: reliabilityrepeatability-2
+    type: oracle
+    severity: fail
+    statement: The run record captures enough identity-safe detail to rerun without guessing.
+  - id: performance-1
+    type: performance
+    severity: fail
+    statement: Wallet prompt shown <= 5s.
+  - id: performance-2
+    type: performance
+    severity: fail
+    statement: Approval to page confirmation <= 10s.
+  - id: performance-3
+    type: performance
+    severity: fail
+    statement: Full free-page-to-paid-page flow <= 45s unless the run record justifies slower wallet substrate behavior.
+  - id: required-state-1
+    type: oracle
+    severity: fail
+    statement: Production health returns ok:true and setupComplete:true.
+    tags:
+      - migrated-preflight
+  - id: required-state-2
+    type: oracle
+    severity: fail
+    statement: The selected publication has pageCount >= 2 and page 1 can be opened free.
+    tags:
+      - migrated-preflight
+  - id: required-state-3
+    type: oracle
+    severity: fail
+    statement: Current pricePerPageSats is known and the run spend cap is greater than or equal to the page price plus fees.
+    tags:
+      - migrated-preflight
+  - id: required-state-4
+    type: oracle
+    severity: fail
+    statement: The selected reader wallet is authenticated, funded, and approved for a real mainnet low-value spend.
+    tags:
+      - migrated-preflight
+  - id: required-state-5
+    type: oracle
+    severity: fail
+    statement: The operator has a UserCom query path for source=papertrade.
+    tags:
+      - migrated-preflight
+policy:
+  unsafeContent: stop
+  highImpactActions: require-approval
+  allowedHosts:
+    - papertrade.metanet.app
+  spendLimit: 100
+  warnExitCode: 0
+remediation:
+  mode: manual
+  allowed: true
+  proposalOnly: true
+  requiredApprovers: 1
+uses: []
