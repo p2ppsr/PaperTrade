@@ -1,0 +1,55 @@
+name: ProofRun product journeys
+
+on:
+  pull_request:
+  workflow_dispatch:
+  schedule:
+    - cron: '13 5 * * 1'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: proofrun-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  journeys:
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    strategy:
+      fail-fast: false
+      max-parallel: 1
+      matrix:
+        workflow:
+          - docs/proofrun/workflows/papertrade-admin-review-ledger-payout.v1.proofrun.yaml
+          - docs/proofrun/workflows/papertrade-author-submission-preview.v1.proofrun.yaml
+          - docs/proofrun/workflows/papertrade-feedback-usercom-signals.v1.proofrun.yaml
+          - docs/proofrun/workflows/papertrade-reader-free-first-page.v1.proofrun.yaml
+          - docs/proofrun/workflows/papertrade-reader-paid-page-purchase.v1.proofrun.yaml
+          - docs/proofrun/workflows/papertrade-reader-paid-page-reread-no-second-charge.v1.proofrun.yaml
+          - docs/proofrun/workflows/papertrade-wallet-failure-recovery.v1.proofrun.yaml
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verify ProofRun API ingress
+        run: curl --fail --show-error --location --retry 3 --retry-all-errors --connect-timeout 10 --max-time 30 https://app.proofrun.metanet.app/healthz
+      - uses: p2ppsr/proofrun-github@5b8f25cf190bb2f258e09b1e1a2e924a14f6641f
+        with:
+          mode: hosted
+          workflow: ${{ matrix.workflow }}
+          profiles: |
+            proofrun/catalog/profiles/impatient-newcomer.yaml
+            proofrun/catalog/profiles/domain-expert.yaml
+          devices: |
+            proofrun/catalog/devices/android-emulator.yaml
+            proofrun/catalog/devices/chromium-desktop.yaml
+            proofrun/catalog/devices/chromium-mobile.yaml
+            proofrun/catalog/devices/ios-simulator.yaml
+            proofrun/catalog/devices/metanet-client-macos.yaml
+            proofrun/catalog/devices/webkit-desktop.yaml
+            proofrun/catalog/devices/webkit-mobile.yaml
+          platform-url: https://app.proofrun.metanet.app
+          token: ${{ secrets.PROOFRUN_TOKEN }}
+          warn-behavior: success
+          timeout-seconds: '6900'

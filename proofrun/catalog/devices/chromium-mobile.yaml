@@ -1,0 +1,14 @@
+apiVersion: proofrun.dev/v1
+kind: DeviceProfile
+metadata:
+  id: device.chromium-mobile
+  version: 1.0.0
+  name: Chromium mobile viewport 412x915
+  description: Portable Android-sized Chromium coverage without an emulator or product-specific app.
+platform: web
+driver: playwright
+screen: {width: 412, height: 915, scale: 2.6, orientation: portrait, colorScheme: light}
+browser: {engine: chromium}
+accessibility: [keyboard, axe, zoom]
+capabilities: [browser.screenshot, browser.dom, browser.trace, touch]
+isolation: {ephemeral: true, networkPolicy: allowlisted, trustedRefsOnly: false}
