@@ -3,7 +3,7 @@ kind: Workflow
 metadata:
   id: papertrade-reader-free-first-page
   name: PaperTrade reader discovery to first free page
-  version: 1.0.0
+  version: 1.0.1
   description: A new reader who is curious about PaperTrade but may not yet understand BSV, wallets, or pay-per-page publishing.
   labels:
     migration: proofrunVersion-1
@@ -39,7 +39,7 @@ matrix:
     - agent: openai-computer
       profile: customer.impatient-newcomer@1.0.0
       accessibility: standard
-      device: device.chromium-mobile@1.0.0
+      device: device.chromium-mobile@1.1.0
       legacyMobileBrowser: android-chrome
       legacyNetworks: mainnet
     - agent: openai-computer

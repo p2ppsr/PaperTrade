@@ -1,0 +1,18 @@
+apiVersion: proofrun.dev/v1
+kind: DeviceProfile
+metadata:
+  id: device.android-emulator
+  version: 1.0.0
+  name: Generic Android small-phone emulator
+  description: A portable contract that opens the workflow target in Chrome on an isolated Android Emulator.
+platform: android
+driver: android-emulator
+screen: {width: 412, height: 915, scale: 2.6, orientation: portrait, colorScheme: light}
+browser: {engine: custom, name: Chrome for Android}
+accessibility: [talkback, font-scale, reduce-motion]
+capabilities: [device.screenshot, device.trace, device.lifecycle, touch]
+provision:
+  bridgeProfile: generic-android-emulator
+  mode: browser
+  image: android-small-phone
+isolation: {ephemeral: true, networkPolicy: allowlisted, trustedRefsOnly: true}

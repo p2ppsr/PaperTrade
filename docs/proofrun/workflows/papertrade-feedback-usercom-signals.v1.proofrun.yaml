@@ -3,7 +3,7 @@ kind: Workflow
 metadata:
   id: papertrade-feedback-usercom-signals
   name: PaperTrade feedback and UserCom signal capture
-  version: 1.0.0
+  version: 1.0.1
   description: A reader, author, or evaluator who needs to send feedback or support context from a real PaperTrade surface.
   labels:
     migration: proofrunVersion-1
@@ -39,7 +39,7 @@ matrix:
     - agent: openai-computer
       profile: customer.impatient-newcomer@1.0.0
       accessibility: standard
-      device: device.chromium-mobile@1.0.0
+      device: device.chromium-mobile@1.1.0
       legacyMobileBrowser: android-chrome
       legacyNetworks: mainnet
     - agent: openai-computer
