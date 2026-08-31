@@ -40,6 +40,7 @@ runtime_base_tag="${RUNTIME_BASE_TAG:-node24-trixie-docs-2026-08-24-r1}"
 registry_push="${REGISTRY_PUSH:-10.152.183.28:5000}"
 registry_pull="${REGISTRY_PULL:-registry.cars-operator-system.svc.cluster.local:5000}"
 kubectl_cmd="${KUBECTL:-kubectl}"
+build_namespace="${KUBECTL_BUILD_NAMESPACE:-papertrade-prod}"
 kaniko_image="${KANIKO_IMAGE:-gcr.io/kaniko-project/executor:debug}"
 build_target="${BUILD_TARGET:-app}"
 cache_repo="${KANIKO_CACHE_REPO:-${registry_push}/p2ppsr/papertrade-build-cache}"
@@ -66,21 +67,21 @@ case "${build_target}" in
 esac
 
 cleanup() {
-  "${kubectl_cmd}" delete pod "${pod}" --ignore-not-found=true --wait=false >/dev/null 2>&1 || true
+  "${kubectl_cmd}" -n "${build_namespace}" delete pod "${pod}" --ignore-not-found=true --wait=false >/dev/null 2>&1 || true
 }
 trap cleanup EXIT
 
 printf 'Starting PaperTrade Kaniko builder pod %s\n' "${pod}"
-"${kubectl_cmd}" run "${pod}" --restart=Never --image="${kaniko_image}" --command -- sleep 3600
+"${kubectl_cmd}" -n "${build_namespace}" run "${pod}" --restart=Never --image="${kaniko_image}" --command -- sleep 3600
 for _ in $(seq 1 30); do
-  if "${kubectl_cmd}" get "pod/${pod}" >/dev/null 2>&1; then
+  if "${kubectl_cmd}" -n "${build_namespace}" get "pod/${pod}" >/dev/null 2>&1; then
     break
   fi
   sleep 1
 done
 sleep "${KANIKO_POD_SETTLE_SECONDS:-5}"
-"${kubectl_cmd}" wait --for=condition=Ready "pod/${pod}" --timeout=3m
-"${kubectl_cmd}" exec "${pod}" -- mkdir -p /kaniko/context
+"${kubectl_cmd}" -n "${build_namespace}" wait --for=condition=Ready "pod/${pod}" --timeout=3m
+"${kubectl_cmd}" -n "${build_namespace}" exec "${pod}" -- mkdir -p /kaniko/context
 
 COPYFILE_DISABLE=1 tar \
   --exclude .git \
@@ -101,7 +102,7 @@ COPYFILE_DISABLE=1 tar \
   --exclude '*.log' \
   --exclude '*.tmp' \
   --exclude tmp \
-  -cf - . | "${kubectl_cmd}" exec -i "${pod}" -- tar -xf - -C /kaniko/context
+  -cf - . | "${kubectl_cmd}" -n "${build_namespace}" exec -i "${pod}" -- tar -xf - -C /kaniko/context
 
 run_kaniko() {
   local dockerfile="$1"
@@ -117,7 +118,7 @@ run_kaniko() {
   printf 'Building %s\n' "${destination}"
   build_log="$(mktemp)"
   set +e
-  "${kubectl_cmd}" exec "${pod}" -- /kaniko/executor \
+  "${kubectl_cmd}" -n "${build_namespace}" exec "${pod}" -- /kaniko/executor \
     --context=/kaniko/context \
     --dockerfile="/kaniko/context/${dockerfile}" \
     --destination="${destination}" \
@@ -137,7 +138,7 @@ run_kaniko() {
     return "${kaniko_status}"
   fi
 
-  last_digest="$("${kubectl_cmd}" exec "${pod}" -- cat "${digest_file}" 2>/dev/null || true)"
+  last_digest="$("${kubectl_cmd}" -n "${build_namespace}" exec "${pod}" -- cat "${digest_file}" 2>/dev/null || true)"
   if [[ -z "${last_digest}" ]]; then
     last_digest="$(sed -nE 's/.*Pushed .*@(sha256:[0-9a-f]{64}).*/\1/p' "${build_log}" | tail -1)"
   fi
