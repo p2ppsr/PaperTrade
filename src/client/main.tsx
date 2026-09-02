@@ -33,6 +33,7 @@ import {
   speechChunks,
   type ReaderSpeechPreferences
 } from './readerSpeech'
+import { shouldShowAdminNavigation } from './navigation'
 
 type WalletSubstrate = 'auto' | 'json-api' | 'secure-json-api' | 'react-native' | 'Cicada' | 'XDM' | 'window.CWI'
 
@@ -1197,7 +1198,7 @@ function Shell ({ children, status }: { children: React.ReactNode, status: Statu
           <Link to='/about'><Info size={18} /> About</Link>
           <Link to='/settings'><SlidersHorizontal size={18} /> Reader settings</Link>
           <Link to='/author'><User size={18} /> Author</Link>
-          <Link to='/admin'><Settings size={18} /> Admin</Link>
+          {shouldShowAdminNavigation(status?.isAdmin) && <Link to='/admin'><Settings size={18} /> Admin</Link>}
         </nav>
         <button
           className='nav-feedback'
