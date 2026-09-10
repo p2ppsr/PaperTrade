@@ -39,7 +39,7 @@
     "@bsv/auth-express-middleware": "2.2.1",
     "@bsv/identity-react": "^1.1.14",
     "@bsv/payment-express-middleware": "2.1.5",
-    "@bsv/sdk": "^2.4.0",
+    "@bsv/sdk": "^2.5.0",
     "@bsv/wallet-toolbox": "2.9.0",
     "@emotion/react": "^11.14.0",
     "@emotion/styled": "^11.14.1",
@@ -75,7 +75,10 @@
     "vitest": "^4.1.8"
   },
   "engines": {
-    "node": ">=20.0.0"
+    "node": ">=22.0.0"
+  },
+  "overrides": {
+    "qs": "6.16.0"
   },
   "ts-standard": {
     "ignore": [
