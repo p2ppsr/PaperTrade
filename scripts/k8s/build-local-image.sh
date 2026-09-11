@@ -13,9 +13,10 @@ Environment:
   BUILD_TARGET             app, runtime-base, or all. Defaults to app.
   SOURCE_SHA               Source commit SHA. Defaults to current git HEAD.
   IMAGE_TAG                App image tag. Defaults to <short-sha>-production-<utc-date>.
-  RUNTIME_BASE_TAG         Runtime base tag. Defaults to node24-trixie-docs-2026-08-24-r1.
+  RUNTIME_BASE_TAG         Runtime base tag. Defaults to node24-trixie-docs-r2.
   RUNTIME_BASE_IMAGE       Pull image used as Dockerfile runtime base. Defaults to
                            <REGISTRY_PULL>/p2ppsr/papertrade-runtime-base:<tag>.
+                           Fresh runtime-base builds pin this value to their digest.
   REGISTRY_PUSH            Push registry. Defaults to 10.152.183.28:5000.
   REGISTRY_PULL            Pull registry written into manifests and build args.
   KANIKO_CACHE_REPO        Cache repository. Defaults to <REGISTRY_PUSH>/p2ppsr/papertrade-build-cache.
@@ -36,7 +37,7 @@ source_sha="${SOURCE_SHA:-$(git rev-parse HEAD)}"
 short_sha="${source_sha:0:12}"
 image_date="${IMAGE_DATE:-$(date -u +%F)}"
 image_tag="${IMAGE_TAG:-${short_sha}-production-${image_date}}"
-runtime_base_tag="${RUNTIME_BASE_TAG:-node24-trixie-docs-2026-08-24-r1}"
+runtime_base_tag="${RUNTIME_BASE_TAG:-node24-trixie-docs-r2}"
 registry_push="${REGISTRY_PUSH:-10.152.183.28:5000}"
 registry_pull="${REGISTRY_PULL:-registry.cars-operator-system.svc.cluster.local:5000}"
 kubectl_cmd="${KUBECTL:-kubectl}"
@@ -55,6 +56,7 @@ pod="papertrade-kaniko-$(date +%s)"
 last_image="${app_pull_image}"
 last_tag="${image_tag}"
 last_digest=""
+runtime_base_digest=""
 
 case "${build_target}" in
   app | runtime-base | all)
@@ -149,14 +151,23 @@ run_kaniko() {
         -H 'Accept: application/vnd.docker.distribution.manifest.v2+json' \
         "http://${registry_push}/v2/${image_repo}/manifests/${image_ref_tag}" \
         | awk -F': ' 'tolower($1) == "docker-content-digest" { gsub("\r", "", $2); print $2; exit }' \
-        || true
+      || true
     )"
+  fi
+  if [[ -z "${last_digest}" ]]; then
+    printf 'Registry did not return a digest for %s\n' "${destination}" >&2
+    return 1
   fi
 }
 
 if [[ "${build_target}" == "runtime-base" || "${build_target}" == "all" ]]; then
-  run_kaniko "Dockerfile.runtime-base" "${runtime_base_push_image}"
-  last_image="${runtime_base_pull_image}"
+  run_kaniko "Dockerfile.runtime-base" "${runtime_base_push_image}" \
+    --cache-run-layers=false
+  runtime_base_digest="${last_digest}"
+  if [[ -z "${RUNTIME_BASE_IMAGE:-}" ]]; then
+    runtime_base_image="${runtime_base_pull_image}@${runtime_base_digest}"
+  fi
+  last_image="${runtime_base_image}"
   last_tag="${runtime_base_tag}"
 fi
 
@@ -179,6 +190,7 @@ cat > release-manifest.json <<EOF
   "image": "${last_image}",
   "image_digest": "${last_digest}",
   "runtime_base_image": "${runtime_base_image}",
+  "runtime_base_digest": "${runtime_base_digest}",
   "runtime_base_tag": "${runtime_base_tag}",
   "cache_repo": "${cache_repo}",
   "cache_ttl": "${cache_ttl}"
