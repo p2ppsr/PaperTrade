@@ -31,6 +31,22 @@ docker build -t papertrade:local .
 Production builds pass `RUNTIME_BASE_IMAGE` explicitly, so the public Dockerfile
 default remains usable for local builders without changing the cluster workflow.
 
+## Durable content storage
+
+Production runs two replicas on separate nodes. Both use the internal S3 API
+for publication files, rendered pages, avatars, and appearance assets. The
+`papertrade-s3-credentials` Secret supplies a bucket-specific access key;
+database, wallet, and S3 credentials are never stored in this repository.
+`/data/papertrade` is an `emptyDir` scratch filesystem used only for upload,
+conversion, rendering, and OCR work.
+
+The deployment has a PDB with `minAvailable: 1` and hard hostname anti-affinity.
+Before node maintenance, require two Ready endpoints on separate nodes and a
+healthy four-member object store. Existing filesystem content must be copied
+from a read-only source mount without delete or sync semantics before enabling
+the S3-backed deployment. Retain the source PVC and PV through cutover
+validation and the first verified off-site backup.
+
 ## Build Cache
 
 `scripts/k8s/build-local-image.sh` runs Kaniko in the cluster and enables a

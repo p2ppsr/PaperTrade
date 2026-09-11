@@ -1,8 +1,9 @@
 import fs from 'fs/promises'
 import path from 'path'
-import { createHash } from 'crypto'
+import { createHash, randomUUID } from 'crypto'
 import { execFile } from 'child_process'
 import { promisify } from 'util'
+import { materializeStoredFile, readStoredFile, storeDirectory, storedFileExists, storeFile } from './objectStorage.js'
 
 const execFileAsync = promisify(execFile)
 const DATA_DIR = process.env.DATA_DIR ?? '/data/papertrade'
@@ -177,20 +178,21 @@ export async function ensurePageText (
   pageNumber: number,
   existingTextPath?: string | null
 ): Promise<{ text: string, textPath: string, textSha256: string, textBytes: number, textSource: 'pdf' | 'ocr' | 'none' }> {
-  if (existingTextPath != null && existingTextPath !== '') {
-    try {
-      const text = normalizePageText(await fs.readFile(existingTextPath, 'utf8'))
-      return {
-        text,
-        textPath: existingTextPath,
-        textSha256: await sha256File(existingTextPath),
-        textBytes: await statSize(existingTextPath),
-        textSource: text === '' ? 'none' : 'pdf'
-      }
-    } catch {}
+  if (existingTextPath != null && existingTextPath !== '' && await storedFileExists(existingTextPath)) {
+    const bytes = await readStoredFile(existingTextPath)
+    const text = normalizePageText(bytes.toString('utf8'))
+    return {
+      text,
+      textPath: existingTextPath,
+      textSha256: createHash('sha256').update(bytes).digest('hex'),
+      textBytes: bytes.length,
+      textSource: text === '' ? 'none' : 'pdf'
+    }
   }
+  await Promise.all([materializeStoredFile(canonicalPdfPath), materializeStoredFile(imagePath)])
   const extracted = await extractPageText(canonicalPdfPath, imagePath, publicationDir, pageNumber)
-  return { text: normalizePageText(await fs.readFile(extracted.textPath, 'utf8')), ...extracted }
+  await storeFile(extracted.textPath, 'text/plain; charset=utf-8')
+  return { text: normalizePageText((await readStoredFile(extracted.textPath)).toString('utf8')), ...extracted }
 }
 
 export async function processPublicationFile (
@@ -204,8 +206,7 @@ export async function processPublicationFile (
     throw new Error('PaperTrade accepts PDF, docx, or ePub files')
   }
 
-  const publicationDir = getPublicationDir(publicationId)
-  await fs.rm(publicationDir, { recursive: true, force: true })
+  const publicationDir = path.join(getPublicationDir(publicationId), 'versions', randomUUID())
   await fs.mkdir(publicationDir, { recursive: true })
   const sourcePath = await copyUploadedSource(tempPath, publicationDir, extension)
   const canonicalPdfPath = await convertToPdf(sourcePath, extension, publicationDir)
@@ -220,6 +221,8 @@ export async function processPublicationFile (
     const extracted = await extractPageText(canonicalPdfPath, rendered.imagePath, publicationDir, pageNumber)
     pages.push({ ...rendered, ...extracted })
   }
+
+  await storeDirectory(publicationDir)
 
   return {
     publicationDir,

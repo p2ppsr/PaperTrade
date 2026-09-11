@@ -90,6 +90,13 @@ docker build -f Dockerfile.runtime-base -t papertrade-runtime-base:local .
 docker build -t papertrade:local .
 ```
 
+Production instances can set `STORAGE_BACKEND=s3` and the `S3_*` variables in
+`.env.example` so publication pages, source files, avatars, and appearance
+assets are shared across replicas. Document conversion still uses `DATA_DIR`
+as local scratch space. Each processed publication version is written to a new
+object prefix before its database rows are updated, so a failed replacement
+cannot overwrite the previously published files.
+
 ## Project Layout
 
 ```text
