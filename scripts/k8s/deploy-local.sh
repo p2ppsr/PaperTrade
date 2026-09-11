@@ -51,6 +51,9 @@ printf 'Deploying PaperTrade image tag %s\n' "${IMAGE_TAG}"
   --from-env-file="${secret_env_file}" \
   --dry-run=client \
   -o yaml | "${kubectl_cmd}" apply -f -
+"${kubectl_cmd}" -n "${namespace}" get secret papertrade-s3-credentials \
+  -o jsonpath='{.data.access-key}{" "}{.data.secret-key}{"\n"}' \
+  | grep -Eq '^[^ ]+ [^ ]+$'
 "${kubectl_cmd}" kustomize "${tmp_dir}/infra/kubernetes/overlays/prod" | "${kubectl_cmd}" apply -f -
 "${kubectl_cmd}" -n "${namespace}" rollout status deployment/papertrade --timeout=15m
 "${kubectl_cmd}" -n "${namespace}" wait --for=condition=Ready certificate/papertrade-tls --timeout=20m

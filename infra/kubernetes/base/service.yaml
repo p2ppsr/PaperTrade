@@ -10,6 +10,7 @@ spec:
   selector:
     app.kubernetes.io/name: papertrade
     app.kubernetes.io/component: api
+    storage.papertrade.metanet.app/backend: s3
   ports:
     - name: http
       port: 8080

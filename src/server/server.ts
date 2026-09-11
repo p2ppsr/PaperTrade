@@ -17,6 +17,7 @@ import { ensurePageText, getPublicationDir, processPublicationFile } from './con
 import { STARTER_AUTHOR_NAME, STARTER_WORKS, starterCoverPath, starterWorkById, type StarterWork, writeStarterPdf } from './starterWorks.js'
 import { appManifest, metaForPath, renderHtmlShell, robotsTxt, sitemapXml, walletManifest, type PublicPublicationMeta } from './web.js'
 import { paymentForPaidPagesOnly } from './paymentRouting.js'
+import { deleteStoredDirectory, readStoredFile, storeBuffer, storedFileExists } from './objectStorage.js'
 
 const serverDirname = path.dirname(fileURLToPath(import.meta.url))
 const HTTP_PORT = Number(process.env.HTTP_PORT ?? process.env.PORT ?? '3001')
@@ -439,7 +440,7 @@ async function canManagePublication (identityKey: string, publication: any): Pro
 }
 
 async function sendPngResponse (req: Request, res: Response, filePath: string, allowJson = true): Promise<void> {
-  const image = await fs.readFile(filePath)
+  const image = await readStoredFile(filePath)
   if (allowJson && req.query.format === 'json') {
     res.json({
       status: 'success',
@@ -457,7 +458,7 @@ async function deletePublication (publicationId: string, actor?: string): Promis
     await trx('publications').where({ id: publicationId }).delete()
     await writeAudit('publication_deleted', actor, 'publication', publicationId, undefined, trx)
   })
-  await fs.rm(getPublicationDir(publicationId), { recursive: true, force: true })
+  await deleteStoredDirectory(getPublicationDir(publicationId))
 }
 
 async function hasValidEntitlement (publicationId: string, pageNumber: number, readerIdentityKey?: string): Promise<boolean> {
@@ -843,7 +844,7 @@ async function removeSeedTestData (): Promise<void> {
   })
 
   await Promise.all(publicationIds.map(async publicationId => {
-    await fs.rm(getPublicationDir(publicationId), { recursive: true, force: true })
+    await deleteStoredDirectory(getPublicationDir(publicationId))
   }))
 }
 
@@ -859,12 +860,7 @@ async function starterNeedsProcessing (publicationId: string): Promise<boolean> 
   const page = await db('publication_pages').where({ publication_id: publicationId, page_number: 1 }).first()
   if (page == null) return true
 
-  try {
-    await fs.access(String(page.image_path))
-    return false
-  } catch {
-    return true
-  }
+  return !(await storedFileExists(String(page.image_path)))
 }
 
 async function seedStarterWork (work: StarterWork, starterAuthorIdentityKey: string): Promise<boolean> {
@@ -1362,10 +1358,9 @@ async function createApp (): Promise<express.Express> {
       'image/gif': '.gif'
     }
     const avatarDir = path.join(DATA_DIR, 'avatars')
-    await fs.mkdir(avatarDir, { recursive: true })
     const avatarId = createHash('sha256').update(identityKey).digest('hex')
     const avatarPath = path.join(avatarDir, `${avatarId}${extByMime[uploaded.mimeType]}`)
-    await fs.writeFile(avatarPath, uploaded.bytes)
+    await storeBuffer(avatarPath, uploaded.bytes, uploaded.mimeType)
     await ensureAuthor(identityKey)
     const avatarUrl = `${ROUTING_PREFIX}/authors/${encodeURIComponent(identityKey)}/avatar`
     await db('authors').where({ identity_key: identityKey }).update({
@@ -1386,11 +1381,10 @@ async function createApp (): Promise<express.Express> {
     const avatarDir = path.join(DATA_DIR, 'avatars')
     const candidates = ['.png', '.jpg', '.webp', '.gif'].map(ext => path.join(avatarDir, `${avatarId}${ext}`))
     for (const candidate of candidates) {
-      try {
-        await fs.access(candidate)
-        res.sendFile(candidate)
-        return
-      } catch {}
+      if (!(await storedFileExists(candidate))) continue
+      const mimeTypes: Record<string, string> = { '.png': 'image/png', '.jpg': 'image/jpeg', '.webp': 'image/webp', '.gif': 'image/gif' }
+      res.type(mimeTypes[path.extname(candidate)] ?? 'application/octet-stream').send(await readStoredFile(candidate))
+      return
     }
     res.status(404).json({ status: 'error', message: 'Avatar not found' })
   })
@@ -1831,9 +1825,8 @@ async function createApp (): Promise<express.Express> {
       'image/gif': '.gif'
     }
     const appearanceDir = path.join(DATA_DIR, 'appearance')
-    await fs.mkdir(appearanceDir, { recursive: true })
     const assetName = `${kind}-${randomUUID()}${extByMime[uploaded.mimeType]}`
-    await fs.writeFile(path.join(appearanceDir, assetName), uploaded.bytes)
+    await storeBuffer(path.join(appearanceDir, assetName), uploaded.bytes, uploaded.mimeType)
     const url = `${ROUTING_PREFIX}/appearance/assets/${assetName}`
     await writeAudit('appearance_asset_uploaded', identityKeyOf(req), 'server_settings', '1', { kind, url })
     res.json({ status: 'success', url })
@@ -1846,13 +1839,13 @@ async function createApp (): Promise<express.Express> {
       return
     }
     const filePath = path.join(DATA_DIR, 'appearance', fileName)
-    try {
-      await fs.access(filePath)
-      res.setHeader('Cache-Control', 'public, max-age=3600')
-      res.sendFile(filePath)
-    } catch {
+    if (!(await storedFileExists(filePath))) {
       res.status(404).json({ status: 'error', message: 'Asset not found' })
+      return
     }
+    res.setHeader('Cache-Control', 'public, max-age=3600')
+    const mimeTypes: Record<string, string> = { '.png': 'image/png', '.jpg': 'image/jpeg', '.webp': 'image/webp', '.gif': 'image/gif' }
+    res.type(mimeTypes[path.extname(filePath)] ?? 'application/octet-stream').send(await readStoredFile(filePath))
   })
 
   api.get('/admin/admins', requireAdmin, async (_req, res) => {

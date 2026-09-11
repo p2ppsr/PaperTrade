@@ -4,10 +4,9 @@ kind: Kustomization
 resources:
   - namespace.yaml
   - configmap.yaml
-  - pvc.yaml
   - service.yaml
   - workload.yaml
-  - ingress.yaml
+  - pdb.yaml
 
 commonLabels:
   app.kubernetes.io/part-of: papertrade

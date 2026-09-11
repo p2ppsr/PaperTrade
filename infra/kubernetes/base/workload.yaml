@@ -6,7 +6,8 @@ metadata:
     app.kubernetes.io/name: papertrade
     app.kubernetes.io/component: api
 spec:
-  replicas: 1
+  replicas: 2
+  minReadySeconds: 10
   strategy:
     type: RollingUpdate
     rollingUpdate:
@@ -21,18 +22,16 @@ spec:
       labels:
         app.kubernetes.io/name: papertrade
         app.kubernetes.io/component: api
+        storage.papertrade.metanet.app/backend: s3
     spec:
-      # PaperTrade's content PVC is ReadWriteOnce. Keep the surge pod on the
-      # current pod's node so both revisions can mount it during a zero-downtime
-      # rollout without attempting a cross-node Longhorn attachment.
       affinity:
-        podAffinity:
+        podAntiAffinity:
           requiredDuringSchedulingIgnoredDuringExecution:
-            - labelSelector:
+            - topologyKey: kubernetes.io/hostname
+              labelSelector:
                 matchLabels:
                   app.kubernetes.io/name: papertrade
                   app.kubernetes.io/component: api
-              topologyKey: kubernetes.io/hostname
       containers:
         - name: papertrade
           image: papertrade:local
@@ -45,6 +44,17 @@ spec:
                 name: papertrade-config
             - secretRef:
                 name: papertrade-secrets
+          env:
+            - name: S3_ACCESS_KEY_ID
+              valueFrom:
+                secretKeyRef:
+                  name: papertrade-s3-credentials
+                  key: access-key
+            - name: S3_SECRET_ACCESS_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: papertrade-s3-credentials
+                  key: secret-key
           volumeMounts:
             - name: papertrade-data
               mountPath: /data/papertrade
@@ -79,5 +89,5 @@ spec:
               memory: 6Gi
       volumes:
         - name: papertrade-data
-          persistentVolumeClaim:
-            claimName: papertrade-data
+          emptyDir:
+            sizeLimit: 10Gi
