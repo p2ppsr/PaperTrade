@@ -52,14 +52,30 @@ runtime_base_pull_image="${REGISTRY_PULL_RUNTIME_BASE:-${registry_pull}/p2ppsr/p
 runtime_base_image="${RUNTIME_BASE_IMAGE:-${runtime_base_pull_image}}"
 app_push_image="${registry_push}/p2ppsr/papertrade:${image_tag}"
 app_pull_image="${registry_pull}/p2ppsr/papertrade:${image_tag}"
+
+if [[ "${build_target}" == "all" ]]; then
+  GITHUB_OUTPUT="" BUILD_TARGET=runtime-base "$0"
+  runtime_base_image="$(sed -nE 's/^  "image": "([^"]+)",$/\1/p' release-manifest.json)"
+  runtime_base_digest="$(sed -nE 's/^  "image_digest": "([^"]+)",$/\1/p' release-manifest.json)"
+  if [[ -z "${runtime_base_image}" || -z "${runtime_base_digest}" ]]; then
+    printf 'Runtime-base build did not produce an exact image and digest\n' >&2
+    exit 1
+  fi
+  BUILD_TARGET=app \
+    RUNTIME_BASE_IMAGE="${runtime_base_image}" \
+    RUNTIME_BASE_DIGEST="${runtime_base_digest}" \
+    "$0"
+  exit
+fi
+
 pod="papertrade-kaniko-$(date +%s)"
 last_image="${app_pull_image}"
 last_tag="${image_tag}"
 last_digest=""
-runtime_base_digest=""
+runtime_base_digest="${RUNTIME_BASE_DIGEST:-}"
 
 case "${build_target}" in
-  app | runtime-base | all)
+  app | runtime-base)
     ;;
   *)
     printf 'Unsupported BUILD_TARGET=%s\n' "${build_target}" >&2
@@ -160,18 +176,16 @@ run_kaniko() {
   fi
 }
 
-if [[ "${build_target}" == "runtime-base" || "${build_target}" == "all" ]]; then
+if [[ "${build_target}" == "runtime-base" ]]; then
   run_kaniko "Dockerfile.runtime-base" "${runtime_base_push_image}" \
     --cache-run-layers=false
   runtime_base_digest="${last_digest}"
-  if [[ -z "${RUNTIME_BASE_IMAGE:-}" ]]; then
-    runtime_base_image="${runtime_base_pull_image}@${runtime_base_digest}"
-  fi
+  runtime_base_image="${runtime_base_pull_image}@${runtime_base_digest}"
   last_image="${runtime_base_image}"
   last_tag="${runtime_base_tag}"
 fi
 
-if [[ "${build_target}" == "app" || "${build_target}" == "all" ]]; then
+if [[ "${build_target}" == "app" ]]; then
   run_kaniko "Dockerfile" "${app_push_image}" \
     --build-arg="RUNTIME_BASE_IMAGE=${runtime_base_image}" \
     --build-arg="VITE_APP_VERSION=${source_sha}"
