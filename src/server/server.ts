@@ -880,9 +880,7 @@ async function seedStarterWork (work: StarterWork, starterAuthorIdentityKey: str
       title: work.title,
       description: work.description,
       status: 'published',
-      reviewed_by: starterAuthorIdentityKey,
-      published_at: db.fn.now(),
-      updated_at: db.fn.now()
+      reviewed_by: starterAuthorIdentityKey
     })
 
   if (!(await starterNeedsProcessing(work.id))) return false
