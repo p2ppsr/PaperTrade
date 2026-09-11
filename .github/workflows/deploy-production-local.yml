@@ -56,16 +56,15 @@ jobs:
           "${KUBECTL}" version --client
           "${KUBECTL}" get nodes -o wide
           "${KUBECTL}" -n papertrade-prod get deployment/papertrade >/dev/null 2>&1 || true
-      - name: Seed runtime base image
-        if: ${{ github.event.inputs.build_runtime_base == 'true' }}
-        run: |
-          set -euo pipefail
-          BUILD_TARGET=runtime-base scripts/k8s/build-local-image.sh
       - name: Build and publish PaperTrade image
         id: build
         run: |
           set -euo pipefail
-          BUILD_TARGET=app scripts/k8s/build-local-image.sh
+          build_target=app
+          if [[ "${{ github.event.inputs.build_runtime_base }}" == "true" ]]; then
+            build_target=all
+          fi
+          BUILD_TARGET="${build_target}" scripts/k8s/build-local-image.sh
       - name: Deploy production to local Kubernetes
         run: |
           set -euo pipefail
