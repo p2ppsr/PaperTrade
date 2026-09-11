@@ -24,6 +24,16 @@ spec:
         app.kubernetes.io/component: api
         storage.papertrade.metanet.app/backend: s3
     spec:
+      automountServiceAccountToken: false
+      terminationGracePeriodSeconds: 60
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        runAsGroup: 1000
+        fsGroup: 1000
+        fsGroupChangePolicy: OnRootMismatch
+        seccompProfile:
+          type: RuntimeDefault
       affinity:
         podAntiAffinity:
           requiredDuringSchedulingIgnoredDuringExecution:
@@ -34,6 +44,11 @@ spec:
                   app.kubernetes.io/component: api
       containers:
         - name: papertrade
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+                - ALL
           image: papertrade:local
           imagePullPolicy: IfNotPresent
           ports:
