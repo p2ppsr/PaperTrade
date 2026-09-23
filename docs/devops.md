@@ -56,6 +56,9 @@ The persistent daemon reuses application dependency layers. Deliberate runtime
 rebuilds use `--pull --no-cache` so distribution security updates are refreshed.
 Every runtime base and application image is resolved to an immutable digest.
 
+The workflow installs Python 3.13 for the guarded promotion and verifies every
+required runner command before building or writing Kubernetes resources.
+
 The production scanner reads a Docker archive of the pulled deployment digest.
 The remote daemon and runner Pod have separate filesystems. The workflow extracts
 Trivy from its digest-pinned Linux/amd64 image and executes the binary on the

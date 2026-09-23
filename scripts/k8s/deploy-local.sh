@@ -23,6 +23,11 @@ registry_pull="${REGISTRY_PULL:-registry.cars-operator-system.svc.cluster.local:
 kubectl_cmd="${KUBECTL:-kubectl}"
 namespace="papertrade-prod"
 
+# Fail before any Kubernetes write when a runner lacks a required runtime.
+for tool in python3 perl curl "$kubectl_cmd"; do command -v "$tool" >/dev/null; done
+python3 -c 'import json, subprocess, threading, urllib.request'
+
+
 tmp_dir="$(mktemp -d)"
 cleanup() {
   rm -rf "${tmp_dir}"
