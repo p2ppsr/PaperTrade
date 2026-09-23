@@ -1,3 +1,4 @@
+import { closeHttpServer } from './shutdown.js'
 /* eslint-disable @typescript-eslint/no-misused-promises */
 import 'dotenv/config'
 import express, { type NextFunction, type Request, type Response } from 'express'
@@ -2074,9 +2075,23 @@ async function createApp (): Promise<express.Express> {
 
 createApp()
   .then(app => {
-    app.listen(HTTP_PORT, () => {
+    const server = app.listen(HTTP_PORT, () => {
       console.log(`PaperTrade listening on ${HTTP_PORT}`)
     })
+    let stopping = false
+    const stop = (): void => {
+      if (stopping) return
+      stopping = true
+      void closeHttpServer(server)
+        .then(async () => { await db.destroy() })
+        .then(() => { process.exit(0) })
+        .catch(() => {
+          console.error('PaperTrade graceful shutdown failed')
+          process.exit(1)
+        })
+    }
+    process.once('SIGTERM', stop)
+    process.once('SIGINT', stop)
   })
   .catch(err => {
     console.error('Failed to start PaperTrade:', err)

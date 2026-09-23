@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-if [[ -z "${IMAGE_TAG:-}" ]]; then
-  printf 'IMAGE_TAG is required\n' >&2
+if [[ -z "${IMAGE_TAG:-}" || ! "${IMAGE_DIGEST:-}" =~ ^sha256:[0-9a-f]{64}$ ]]; then
+  printf 'IMAGE_TAG and an immutable IMAGE_DIGEST are required\n' >&2
   exit 2
 fi
 
@@ -33,9 +33,9 @@ mkdir -p "${tmp_dir}/infra"
 cp -R "${repo_root}/infra/kubernetes" "${tmp_dir}/infra/kubernetes"
 kustomization="${tmp_dir}/infra/kubernetes/overlays/prod/kustomization.yaml"
 
-export IMAGE_TAG REGISTRY_PULL="${registry_pull}"
+export IMAGE_TAG IMAGE_DIGEST REGISTRY_PULL="${registry_pull}"
 perl -0pi -e 's#newName: [^\n]*/p2ppsr/papertrade#newName: $ENV{REGISTRY_PULL}/p2ppsr/papertrade#g' "${kustomization}"
-perl -0pi -e 's#newTag: [^\n]+#newTag: $ENV{IMAGE_TAG}#g' "${kustomization}"
+perl -0pi -e 's#newTag: [^\n]+#digest: $ENV{IMAGE_DIGEST}#g' "${kustomization}"
 
 secret_env_file="${tmp_dir}/papertrade-secrets.env"
 umask 077
@@ -54,8 +54,9 @@ printf 'Deploying PaperTrade image tag %s\n' "${IMAGE_TAG}"
 "${kubectl_cmd}" -n "${namespace}" get secret papertrade-s3-credentials \
   -o jsonpath='{.data.access-key}{" "}{.data.secret-key}{"\n"}' \
   | grep -Eq '^[^ ]+ [^ ]+$'
-"${kubectl_cmd}" kustomize "${tmp_dir}/infra/kubernetes/overlays/prod" | "${kubectl_cmd}" apply -f -
-"${kubectl_cmd}" -n "${namespace}" rollout status deployment/papertrade --timeout=15m
+"${kubectl_cmd}" kustomize "${tmp_dir}/infra/kubernetes/overlays/prod" > "${tmp_dir}/desired.yaml"
+python3 scripts/k8s/promote-guarded.py "${tmp_dir}/desired.yaml" \
+  "${registry_pull}/p2ppsr/papertrade@${IMAGE_DIGEST}"
 "${kubectl_cmd}" -n "${namespace}" wait --for=condition=Ready certificate/papertrade-tls --timeout=20m
 
 curl_pod="papertrade-smoke-$(date +%s)"

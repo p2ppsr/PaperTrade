@@ -82,3 +82,7 @@ Unauthenticated visitors can browse publications and read page 1. Authenticated
 author, admin, preview, paid-page, and payout flows require a compatible wallet
 environment. For local debugging, use a wallet browser or set
 `VITE_WALLET_SUBSTRATE` deliberately for the wallet bridge you are testing.
+
+## Wallet SDK dependency baseline
+
+The application now pins published SDK 2.8.2 and Toolbox Client 2.14.0. SDK [TS Stack #581](https://github.com/bsv-blockchain/ts-stack/pull/581) separates automatic wallet discovery from subsequent approval/response timing: React Native and XDM discovery remain bounded, but a successfully discovered connection no longer inherits the probe-only deadline. Explicit operation timeouts and response/origin validation are preserved. Rebuild and deploy the web bundle to receive this fix; upgrading the wallet alone does not replace the application SDK.
