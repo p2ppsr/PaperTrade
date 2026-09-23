@@ -132,3 +132,35 @@ The scanner gate runs outside the production cluster. This keeps large
 LibreOffice and Calibre rebuild downloads off the Evans Creek Starlink links
 and prevents a security candidate build from competing with production pods.
 The production deploy remains a separate, explicitly dispatched workflow.
+
+## Guarded Kubernetes promotion
+
+Production builds must pass the runtime policy on their exact immutable image
+digest. `deploy-local.sh` requires `IMAGE_TAG` and `IMAGE_DIGEST`; the deployment
+workflow supplies both from its build output and retains the scan and rollout
+evidence, including on failure. The SDK upgrade includes no database migration.
+Any future schema change needs compatibility review before using this procedure.
+
+`promote-guarded.py` creates two candidate replicas on distinct nodes behind a
+private Service, with a PDB and a copy of the existing production egress boundary.
+Both replicas must serve health, status, catalog and a real stored free-page PNG;
+an anonymous paid-page request must still be denied. The candidate's ten-second
+preStop hook is exercised by withdrawing one candidate while another node serves
+100 consecutive requests. Two exact-image Ready replicas must return before
+promotion. Public root, health, catalog and stored-page probes run throughout.
+
+The public Service then selects the verified candidate pool. Its EndpointSlices
+must name those exact Pods. Only after ten seconds of withdrawal may the legacy
+Deployment change, which also protects old Pods that did not have a drain hook.
+After the canonical pool observes its new generation and has two Ready, available
+replicas at the exact digest, both pass content checks and its PDB permits one
+disruption, traffic returns to it. The temporary pool drains before removal.
+
+A failed or ambiguous cutover keeps the candidate pool intact. A failed canonical
+rollout leaves the two verified candidates serving; inspect the latched failure,
+repair or roll back the canonical Deployment, verify it, then explicitly switch
+back before removing candidates. Never rerun over a surviving candidate pool or
+delete that pool while the public Service selects it. A failure before cutover
+removes only the isolated candidate resources and preserves the old public pool.
+Network-ops fleet gates and independent public probes remain required around
+the workflow.

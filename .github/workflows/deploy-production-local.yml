@@ -65,14 +65,30 @@ jobs:
             build_target=all
           fi
           BUILD_TARGET="${build_target}" scripts/k8s/build-local-image.sh
+      - name: Scan the exact production digest
+        env:
+          CANDIDATE_DIGEST: ${{ steps.build.outputs.image_digest }}
+        run: |
+          set -euo pipefail
+          docker run --rm --volume "$GITHUB_WORKSPACE:/workspace" \
+            aquasec/trivy:0.73.0@sha256:7cced7cae583819fc7806d4cbc0dbbc7cad18b99f7d3e235192e6da8c091045c \
+            image --insecure --scanners vuln --format json \
+            --output /workspace/trivy-production-image.json \
+            "${REGISTRY_PUSH}/p2ppsr/papertrade@${CANDIDATE_DIGEST}"
+          .github/scripts/enforce-image-security.sh trivy-production-image.json
       - name: Deploy production to local Kubernetes
         run: |
           set -euo pipefail
-          IMAGE_TAG="${{ steps.build.outputs.image_tag }}" scripts/k8s/deploy-local.sh
+          IMAGE_TAG="${{ steps.build.outputs.image_tag }}" \
+          IMAGE_DIGEST="${{ steps.build.outputs.image_digest }}" scripts/k8s/deploy-local.sh
       - uses: actions/upload-artifact@v4
+        if: always()
         with:
           name: papertrade-release-manifest-${{ steps.build.outputs.image_tag }}
-          path: release-manifest.json
+          path: |
+            release-manifest.json
+            rollout-evidence.jsonl
+            trivy-production-image.json
       - name: Deployment summary
         run: |
           {

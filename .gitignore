@@ -7,3 +7,6 @@ coverage/
 .DS_Store
 data/
 *.log
+
+# Python release-guard validation
+__pycache__/

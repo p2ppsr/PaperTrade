@@ -51,6 +51,10 @@ spec:
                 - ALL
           image: papertrade:local
           imagePullPolicy: IfNotPresent
+          lifecycle:
+            preStop:
+              exec:
+                command: ["node", "-e", "setTimeout(() => {}, 10000)"]
           ports:
             - name: http
               containerPort: 8080
