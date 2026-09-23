@@ -68,28 +68,7 @@ jobs:
       - name: Scan the exact production digest
         env:
           CANDIDATE_DIGEST: ${{ steps.build.outputs.image_digest }}
-        run: |
-          set -euo pipefail
-          exact_image="${REGISTRY_PUSH}/p2ppsr/papertrade@${CANDIDATE_DIGEST}"
-          docker pull "$exact_image"
-          archive="$(mktemp)"
-          scanner=""
-          cleanup() {
-            rm -f "$archive"
-            if [[ -n "$scanner" ]]; then docker rm -f "$scanner" >/dev/null; fi
-          }
-          trap cleanup EXIT
-          docker save --output "$archive" "$exact_image"
-          # The remote daemon cannot bind-mount this runner Pod's workspace.
-          # Copy an exact-image archive instead of exposing the Docker socket or credentials.
-          scanner="$(docker create \
-            aquasec/trivy:0.73.0@sha256:7cced7cae583819fc7806d4cbc0dbbc7cad18b99f7d3e235192e6da8c091045c \
-            image --input /tmp/papertrade.tar --scanners vuln --format json \
-            --output /tmp/trivy-production-image.json)"
-          docker cp "$archive" "$scanner:/tmp/papertrade.tar"
-          docker start --attach "$scanner"
-          docker cp "$scanner:/tmp/trivy-production-image.json" trivy-production-image.json
-          .github/scripts/enforce-image-security.sh trivy-production-image.json
+        run: scripts/k8s/scan-production-image.sh
       - name: Deploy production to local Kubernetes
         run: |
           set -euo pipefail

@@ -56,10 +56,12 @@ The persistent daemon reuses application dependency layers. Deliberate runtime
 rebuilds use `--pull --no-cache` so distribution security updates are refreshed.
 Every runtime base and application image is resolved to an immutable digest.
 
-The production scanner receives a Docker archive of the pulled deployment digest.
-The runner and remote daemon have different filesystems, so the workflow uses
-`docker cp` instead of a workspace bind mount. No scanner Docker socket or registry
-credentials are exposed. Scan artifacts remain available on policy failure.
+The production scanner reads a Docker archive of the pulled deployment digest.
+The remote daemon and runner Pod have separate filesystems. The workflow extracts
+Trivy from its digest-pinned Linux/amd64 image and executes the binary on the
+runner, without starting a scanner container or mounting the workspace remotely.
+Production and Docker credential environment variables are removed for scanning.
+The existing critical/fixable-high policy remains mandatory before promotion.
 
 ## Common Commands
 
