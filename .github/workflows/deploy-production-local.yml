@@ -33,7 +33,7 @@ jobs:
       - local-registry
     environment: production
     env:
-      REGISTRY_PUSH: ${{ vars.LOCAL_REGISTRY_PUSH || '10.152.183.28:5000' }}
+      REGISTRY_PUSH: ${{ vars.LOCAL_REGISTRY_PUSH || 'registry.cars-operator-system.svc.cluster.local:5000' }}
       REGISTRY_PULL: ${{ vars.LOCAL_REGISTRY_PULL || 'registry.cars-operator-system.svc.cluster.local:5000' }}
       KUBECTL: ${{ vars.LOCAL_KUBECTL || 'kubectl' }}
       SQL_DATABASE_USER: ${{ secrets.PROD_SQL_DATABASE_USER }}
@@ -70,11 +70,25 @@ jobs:
           CANDIDATE_DIGEST: ${{ steps.build.outputs.image_digest }}
         run: |
           set -euo pipefail
-          docker run --rm --volume "$GITHUB_WORKSPACE:/workspace" \
+          exact_image="${REGISTRY_PUSH}/p2ppsr/papertrade@${CANDIDATE_DIGEST}"
+          docker pull "$exact_image"
+          archive="$(mktemp)"
+          scanner=""
+          cleanup() {
+            rm -f "$archive"
+            if [[ -n "$scanner" ]]; then docker rm -f "$scanner" >/dev/null; fi
+          }
+          trap cleanup EXIT
+          docker save --output "$archive" "$exact_image"
+          # The remote daemon cannot bind-mount this runner Pod's workspace.
+          # Copy an exact-image archive instead of exposing the Docker socket or credentials.
+          scanner="$(docker create \
             aquasec/trivy:0.73.0@sha256:7cced7cae583819fc7806d4cbc0dbbc7cad18b99f7d3e235192e6da8c091045c \
-            image --insecure --scanners vuln --format json \
-            --output /workspace/trivy-production-image.json \
-            "${REGISTRY_PUSH}/p2ppsr/papertrade@${CANDIDATE_DIGEST}"
+            image --input /tmp/papertrade.tar --scanners vuln --format json \
+            --output /tmp/trivy-production-image.json)"
+          docker cp "$archive" "$scanner:/tmp/papertrade.tar"
+          docker start --attach "$scanner"
+          docker cp "$scanner:/tmp/trivy-production-image.json" trivy-production-image.json
           .github/scripts/enforce-image-security.sh trivy-production-image.json
       - name: Deploy production to local Kubernetes
         run: |
