@@ -43,6 +43,10 @@ jobs:
       - uses: actions/checkout@v7.0.0
         with:
           fetch-depth: 0
+      - name: Install rollout runtime
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: '3.13'
       - name: Select deploy commit
         run: |
           set -euo pipefail
@@ -53,6 +57,8 @@ jobs:
       - name: Deploy preflight
         run: |
           set -euo pipefail
+          for tool in python3 docker jq perl curl; do command -v "$tool" >/dev/null; done
+          python3 -c 'import json, subprocess, threading, urllib.request'
           "${KUBECTL}" version --client
           "${KUBECTL}" get nodes -o wide
           "${KUBECTL}" -n papertrade-prod get deployment/papertrade >/dev/null 2>&1 || true
