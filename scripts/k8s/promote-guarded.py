@@ -146,8 +146,10 @@ def smoke(pods):
 def main(manifest, image):
     if '@sha256:' not in image or len(image.rsplit('@sha256:', 1)[1]) != 64:
         raise ValueError('An immutable candidate digest is required')
-    # kubectl emits one JSON object for each input resource; no third-party YAML dependency.
-    rendered = command('apply', '--dry-run=client', '-f', manifest, '-o', 'json')
+    # Convert source manifests without merging live objects. Dry-run apply reads
+    # existing resources and carries their allocated Service IPs and server
+    # metadata into the copy, which cannot be reused by the shadow pool.
+    rendered = command('create', '--dry-run=client', '-f', manifest, '-o', 'json')
     decoder, resources = json.JSONDecoder(), []
     while rendered.strip():
         item, end = decoder.raw_decode(rendered.lstrip())

@@ -1,4 +1,5 @@
 import importlib.util
+import copy
 import json
 import pathlib
 import unittest
@@ -27,8 +28,15 @@ class PromotionSafety(unittest.TestCase):
     def exercise(self, failure=None):
         def command(*args, value=None):
             self.trace.append(('command', args, value))
-            if args[0] == 'apply' and '--dry-run=client' in args:
-                return json.dumps({'kind': 'List', 'items': [DEPLOYMENT, SERVICE]})
+            if '--dry-run=client' in args:
+                service = copy.deepcopy(SERVICE)
+                if args[0] == 'apply':
+                    # kubectl apply merges the existing live object even in
+                    # client dry-run mode; its allocated address is not reusable.
+                    service['spec']['clusterIP'] = '10.152.183.202'
+                    service['spec']['clusterIPs'] = ['10.152.183.202']
+                    service['metadata']['resourceVersion'] = '123'
+                return json.dumps({'kind': 'List', 'items': [DEPLOYMENT, service]})
             if args[0] == 'patch' and failure == 'ambiguous-cutover':
                 raise RuntimeError('connection lost after patch')
             return ''
@@ -65,6 +73,16 @@ class PromotionSafety(unittest.TestCase):
         self.assertIn(('wait', 10), self.trace[cutover:canonical_apply])
         self.assertTrue(any(t[:2] == ('event', 'promotion-accepted') for t in self.trace))
         self.assertTrue(any(t[0] == 'command' and t[1][:2] == ('delete', 'deployment') for t in self.trace))
+
+    def test_shadow_service_does_not_inherit_live_allocated_address(self):
+        self.exercise()
+        shadow = next(json.loads(t[2]) for t in self.trace
+                      if t[0] == 'command' and t[1] == ('apply', '-f', '-')
+                      and json.loads(t[2]).get('kind') == 'Service'
+                      and json.loads(t[2])['metadata']['name'] == m.CANDIDATE)
+        self.assertNotIn('clusterIP', shadow['spec'])
+        self.assertNotIn('clusterIPs', shadow['spec'])
+        self.assertNotIn('resourceVersion', shadow['metadata'])
 
     def test_bad_canary_never_changes_public_service_or_main_deployment(self):
         with self.assertRaisesRegex(RuntimeError, 'canary failed'): self.exercise('canary-smoke')
