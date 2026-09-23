@@ -127,9 +127,12 @@ await get('/'); const status=await (await get('/api/status')).json();if(status.s
 const catalog=await (await get('/api/publications')).json();const id=catalog.publications[0]?.id;if(!id)throw Error('empty catalog');
 const page=await get(`/api/publications/${id}/pages/1`);const bytes=Buffer.from(await page.arrayBuffer());
 if(page.headers.get('x-papertrade-page-access')!=='free'||bytes.subarray(0,8).toString('hex')!=='89504e470d0a1a0a')throw Error('free PNG failed');
+const view=await (await get(`/api/publications/${id}/pages/1?format=json`)).json();
+if(view.status!=='success'||view.pageAccessMode!=='free'||!view.imageUrl?.startsWith(`/api/publications/${id}/pages/1/rendered?`))throw Error('free JSON view failed');
+const rendered=Buffer.from(await (await get(view.imageUrl)).arrayBuffer());if(rendered.subarray(0,8).toString('hex')!=='89504e470d0a1a0a')throw Error('rendered PNG failed');
 const paid=await fetch(base+`/api/publications/${id}/pages/2`,{signal:AbortSignal.timeout(10000)});
 if(paid.status!==401)throw Error('anonymous paid page did not reject');
-console.log(JSON.stringify({health:true,catalog:true,freePNG:true,paidAccessDenied:true}));
+console.log(JSON.stringify({health:true,catalog:true,freePNG:true,freeJSON:true,renderedPNG:true,paidAccessDenied:true}));
 """
 
 
