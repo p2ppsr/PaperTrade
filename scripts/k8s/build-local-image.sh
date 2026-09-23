@@ -1,226 +1,70 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-usage() {
-  cat >&2 <<'EOF'
-Usage: scripts/k8s/build-local-image.sh
-
-Builds PaperTrade images with in-cluster Kaniko and pushes them to the local
-registry. App builds use a persistent Kaniko cache and a reusable runtime base
-image so normal deployments avoid re-downloading document conversion packages.
-
-Environment:
-  BUILD_TARGET             app, runtime-base, or all. Defaults to app.
-  SOURCE_SHA               Source commit SHA. Defaults to current git HEAD.
-  IMAGE_TAG                App image tag. Defaults to <short-sha>-production-<utc-date>.
-  RUNTIME_BASE_TAG         Runtime base tag. Defaults to node24-trixie-docs-r2.
-  RUNTIME_BASE_IMAGE       Pull image used as Dockerfile runtime base. Defaults to
-                           <REGISTRY_PULL>/p2ppsr/papertrade-runtime-base:<tag>.
-                           Fresh runtime-base builds pin this value to their digest.
-  REGISTRY_PUSH            Push registry. Defaults to 10.152.183.28:5000.
-  REGISTRY_PULL            Pull registry written into manifests and build args.
-  KANIKO_CACHE_REPO        Cache repository. Defaults to <REGISTRY_PUSH>/p2ppsr/papertrade-build-cache.
-  KANIKO_CACHE_TTL         Cache TTL. Defaults to 720h.
-  REGISTRY_DIGEST_TIMEOUT  Seconds to wait for registry digest lookup. Defaults to 5.
-EOF
-}
-
 if [[ "${1:-}" == "-h" || "${1:-}" == "--help" ]]; then
-  usage
+  cat <<'USAGE'
+Build and publish PaperTrade using an authenticated Linux/amd64 rootless Docker daemon.
+BUILD_TARGET: app (default), runtime-base, or all.
+SOURCE_SHA: source commit (default HEAD). IMAGE_TAG: traceable application tag.
+REGISTRY_PUSH / REGISTRY_PULL: authenticated registry endpoints.
+RUNTIME_BASE_TAG: runtime tag. RUNTIME_BASE_IMAGE: optional exact runtime reference.
+Rebuilding the runtime always refreshes distribution packages without cached RUN layers.
+USAGE
   exit 0
 fi
 
-repo_root="$(git rev-parse --show-toplevel)"
-cd "${repo_root}"
-
+cd "$(git rev-parse --show-toplevel)"
 source_sha="${SOURCE_SHA:-$(git rev-parse HEAD)}"
-short_sha="${source_sha:0:12}"
-image_date="${IMAGE_DATE:-$(date -u +%F)}"
-image_tag="${IMAGE_TAG:-${short_sha}-production-${image_date}}"
-runtime_base_tag="${RUNTIME_BASE_TAG:-node24-trixie-docs-r2}"
-registry_push="${REGISTRY_PUSH:-10.152.183.28:5000}"
+[[ "$source_sha" =~ ^[0-9a-f]{40}$ ]] || { echo 'SOURCE_SHA must be a full commit SHA' >&2; exit 2; }
+engine="$(docker info --format '{{json .}}')"
+jq -e '.OSType == "linux" and (.Architecture == "x86_64" or .Architecture == "amd64") and any(.SecurityOptions[]; startswith("name=rootless"))' <<<"$engine" >/dev/null || {
+  echo 'Production builds require the managed Linux/amd64 rootless Docker daemon' >&2; exit 2;
+}
+registry_push="${REGISTRY_PUSH:-registry.cars-operator-system.svc.cluster.local:5000}"
 registry_pull="${REGISTRY_PULL:-registry.cars-operator-system.svc.cluster.local:5000}"
-kubectl_cmd="${KUBECTL:-kubectl}"
-build_namespace="${KUBECTL_BUILD_NAMESPACE:-papertrade-prod}"
-kaniko_image="${KANIKO_IMAGE:-gcr.io/kaniko-project/executor:debug}"
+image_tag="${IMAGE_TAG:-${source_sha:0:12}-production-$(date -u +%F)}"
+runtime_base_tag="${RUNTIME_BASE_TAG:-node24-trixie-docs-r2}"
 build_target="${BUILD_TARGET:-app}"
-cache_repo="${KANIKO_CACHE_REPO:-${registry_push}/p2ppsr/papertrade-build-cache}"
-cache_ttl="${KANIKO_CACHE_TTL:-720h}"
-registry_digest_timeout="${REGISTRY_DIGEST_TIMEOUT:-5}"
-runtime_base_push_image="${registry_push}/p2ppsr/papertrade-runtime-base:${runtime_base_tag}"
-runtime_base_pull_image="${REGISTRY_PULL_RUNTIME_BASE:-${registry_pull}/p2ppsr/papertrade-runtime-base:${runtime_base_tag}}"
-runtime_base_image="${RUNTIME_BASE_IMAGE:-${runtime_base_pull_image}}"
-app_push_image="${registry_push}/p2ppsr/papertrade:${image_tag}"
-app_pull_image="${registry_pull}/p2ppsr/papertrade:${image_tag}"
+[[ "$build_target" == app || "$build_target" == runtime-base || "$build_target" == all ]] || { echo 'Invalid BUILD_TARGET' >&2; exit 2; }
+runtime_repo="${registry_push}/p2ppsr/papertrade-runtime-base"
+app_repo="${registry_push}/p2ppsr/papertrade"
+runtime_ref="${RUNTIME_BASE_IMAGE:-${runtime_repo}:${runtime_base_tag}}"
 
-if [[ "${build_target}" == "all" ]]; then
-  GITHUB_OUTPUT="" BUILD_TARGET=runtime-base "$0"
-  runtime_base_image="$(sed -nE 's/^  "image": "([^"]+)",$/\1/p' release-manifest.json)"
-  runtime_base_digest="$(sed -nE 's/^  "image_digest": "([^"]+)",$/\1/p' release-manifest.json)"
-  if [[ -z "${runtime_base_image}" || -z "${runtime_base_digest}" ]]; then
-    printf 'Runtime-base build did not produce an exact image and digest\n' >&2
-    exit 1
-  fi
-  BUILD_TARGET=app \
-    RUNTIME_BASE_IMAGE="${runtime_base_image}" \
-    RUNTIME_BASE_DIGEST="${runtime_base_digest}" \
-    "$0"
-  exit
-fi
-
-pod="papertrade-kaniko-$(date +%s)"
-last_image="${app_pull_image}"
-last_tag="${image_tag}"
-last_digest=""
-runtime_base_digest="${RUNTIME_BASE_DIGEST:-}"
-
-case "${build_target}" in
-  app | runtime-base)
-    ;;
-  *)
-    printf 'Unsupported BUILD_TARGET=%s\n' "${build_target}" >&2
-    usage
-    exit 2
-    ;;
-esac
-
-cleanup() {
-  "${kubectl_cmd}" -n "${build_namespace}" delete pod "${pod}" --ignore-not-found=true --wait=false >/dev/null 2>&1 || true
+# Docker uses the runner's existing registry credentials and verified TLS.
+# Resolve every base and published image to a registry-verified immutable digest.
+digest_for() {
+  docker image inspect "$1" --format '{{json .RepoDigests}}' |
+    jq -er --arg repo "$2" '[.[] | select(startswith($repo + "@sha256:"))][0] | split("@")[1] | select(test("^sha256:[0-9a-f]{64}$"))'
 }
-trap cleanup EXIT
-
-printf 'Starting PaperTrade Kaniko builder pod %s\n' "${pod}"
-"${kubectl_cmd}" -n "${build_namespace}" run "${pod}" --restart=Never --image="${kaniko_image}" --command -- sleep 3600
-for _ in $(seq 1 30); do
-  if "${kubectl_cmd}" -n "${build_namespace}" get "pod/${pod}" >/dev/null 2>&1; then
-    break
-  fi
-  sleep 1
-done
-sleep "${KANIKO_POD_SETTLE_SECONDS:-5}"
-"${kubectl_cmd}" -n "${build_namespace}" wait --for=condition=Ready "pod/${pod}" --timeout=3m
-"${kubectl_cmd}" -n "${build_namespace}" exec "${pod}" -- mkdir -p /kaniko/context
-
-COPYFILE_DISABLE=1 tar \
-  --exclude .git \
-  --exclude .github \
-  --exclude node_modules \
-  --exclude build \
-  --exclude dist \
-  --exclude coverage \
-  --exclude data \
-  --exclude docs \
-  --exclude infra \
-  --exclude scripts \
-  --exclude .env \
-  --exclude release-manifest.json \
-  --exclude npm-debug.log \
-  --exclude .DS_Store \
-  --exclude '._*' \
-  --exclude '*.log' \
-  --exclude '*.tmp' \
-  --exclude tmp \
-  -cf - . | "${kubectl_cmd}" -n "${build_namespace}" exec -i "${pod}" -- tar -xf - -C /kaniko/context
-
-run_kaniko() {
-  local dockerfile="$1"
-  local destination="$2"
-  shift 2
-  local digest_file="/kaniko/digest-$(basename "${dockerfile}")"
-  local image_ref="${destination#${registry_push}/}"
-  local image_repo="${image_ref%:*}"
-  local image_ref_tag="${image_ref##*:}"
-  local build_log
-  local kaniko_status
-
-  printf 'Building %s\n' "${destination}"
-  build_log="$(mktemp)"
-  set +e
-  "${kubectl_cmd}" -n "${build_namespace}" exec "${pod}" -- /kaniko/executor \
-    --context=/kaniko/context \
-    --dockerfile="/kaniko/context/${dockerfile}" \
-    --destination="${destination}" \
-    --digest-file="${digest_file}" \
-    --cache=true \
-    --cache-repo="${cache_repo}" \
-    --cache-ttl="${cache_ttl}" \
-    --insecure \
-    --insecure-registry="${registry_push}" \
-    --insecure-registry="${registry_pull}" \
-    --skip-tls-verify \
-    "$@" 2>&1 | tee "${build_log}"
-  kaniko_status="${PIPESTATUS[0]}"
-  set -e
-  if [[ "${kaniko_status}" -ne 0 ]]; then
-    rm -f "${build_log}"
-    return "${kaniko_status}"
-  fi
-
-  last_digest="$("${kubectl_cmd}" -n "${build_namespace}" exec "${pod}" -- cat "${digest_file}" 2>/dev/null || true)"
-  if [[ -z "${last_digest}" ]]; then
-    last_digest="$(sed -nE 's/.*Pushed .*@(sha256:[0-9a-f]{64}).*/\1/p' "${build_log}" | tail -1)"
-  fi
-  rm -f "${build_log}"
-  if [[ -z "${last_digest}" ]] && command -v curl >/dev/null 2>&1; then
-    last_digest="$(
-      curl --fail --silent --show-error --head --max-time "${registry_digest_timeout}" \
-        -H 'Accept: application/vnd.docker.distribution.manifest.v2+json' \
-        "http://${registry_push}/v2/${image_repo}/manifests/${image_ref_tag}" \
-        | awk -F': ' 'tolower($1) == "docker-content-digest" { gsub("\r", "", $2); print $2; exit }' \
-      || true
-    )"
-  fi
-  if [[ -z "${last_digest}" ]]; then
-    printf 'Registry did not return a digest for %s\n' "${destination}" >&2
-    return 1
-  fi
-}
-
-if [[ "${build_target}" == "runtime-base" ]]; then
-  run_kaniko "Dockerfile.runtime-base" "${runtime_base_push_image}" \
-    --cache-run-layers=false
-  runtime_base_digest="${last_digest}"
-  runtime_base_image="${runtime_base_pull_image}@${runtime_base_digest}"
-  last_image="${runtime_base_image}"
-  last_tag="${runtime_base_tag}"
+if [[ "$build_target" == runtime-base || "$build_target" == all ]]; then
+  runtime_ref="${runtime_repo}:${runtime_base_tag}"
+  docker build --platform linux/amd64 --pull --no-cache \
+    --file Dockerfile.runtime-base --tag "$runtime_ref" .
+  docker push "$runtime_ref"
 fi
-
-if [[ "${build_target}" == "app" ]]; then
-  run_kaniko "Dockerfile" "${app_push_image}" \
-    --build-arg="RUNTIME_BASE_IMAGE=${runtime_base_image}" \
-    --build-arg="VITE_APP_VERSION=${source_sha}"
-  last_image="${app_pull_image}"
-  last_tag="${image_tag}"
+docker pull "$runtime_ref"
+runtime_base_digest="$(docker image inspect "$runtime_ref" --format '{{json .RepoDigests}}' | jq -er '.[0] | split("@")[1] | select(test("^sha256:[0-9a-f]{64}$"))')"
+runtime_base_image="${registry_pull}/p2ppsr/papertrade-runtime-base@${runtime_base_digest}"
+# Pull via the exact name used in FROM so Docker validates that registry path too.
+docker pull "$runtime_base_image"
+last_image="$runtime_base_image"
+last_digest="$runtime_base_digest"
+last_tag="$runtime_base_tag"
+if [[ "$build_target" == app || "$build_target" == all ]]; then
+  docker build --platform linux/amd64 --pull --file Dockerfile \
+    --build-arg "RUNTIME_BASE_IMAGE=$runtime_base_image" \
+    --build-arg "VITE_APP_VERSION=$source_sha" --tag "${app_repo}:${image_tag}" .
+  docker push "${app_repo}:${image_tag}"
+  last_digest="$(digest_for "${app_repo}:${image_tag}" "$app_repo")"
+  last_image="${registry_pull}/p2ppsr/papertrade:${image_tag}"
+  last_tag="$image_tag"
 fi
-
-cat > release-manifest.json <<EOF
-{
-  "source_sha": "${source_sha}",
-  "environment": "production",
-  "build_target": "${build_target}",
-  "image_tag": "${last_tag}",
-  "registry_push": "${registry_push}",
-  "registry_pull": "${registry_pull}",
-  "image": "${last_image}",
-  "image_digest": "${last_digest}",
-  "runtime_base_image": "${runtime_base_image}",
-  "runtime_base_digest": "${runtime_base_digest}",
-  "runtime_base_tag": "${runtime_base_tag}",
-  "cache_repo": "${cache_repo}",
-  "cache_ttl": "${cache_ttl}"
-}
-EOF
-
+jq -n --arg source_sha "$source_sha" --arg build_target "$build_target" \
+  --arg image "$last_image" --arg image_tag "$last_tag" --arg image_digest "$last_digest" \
+  --arg runtime_base_image "$runtime_base_image" --arg runtime_base_digest "$runtime_base_digest" \
+  '{source_sha:$source_sha,environment:"production",build_target:$build_target,image:$image,image_tag:$image_tag,image_digest:$image_digest,runtime_base_image:$runtime_base_image,runtime_base_digest:$runtime_base_digest}' > release-manifest.json
 if [[ -n "${GITHUB_OUTPUT:-}" ]]; then
-  {
-    printf 'image_tag=%s\n' "${last_tag}"
-    printf 'image=%s\n' "${last_image}"
-    printf 'image_digest=%s\n' "${last_digest}"
-    printf 'runtime_base_image=%s\n' "${runtime_base_image}"
-  } >> "${GITHUB_OUTPUT}"
+  printf 'image_tag=%s\nimage=%s\nimage_digest=%s\nruntime_base_image=%s\n' \
+    "$last_tag" "$last_image" "$last_digest" "$runtime_base_image" >> "$GITHUB_OUTPUT"
 fi
-
-printf 'Pushed image:\n  %s\n' "${last_image}"
-if [[ -n "${last_digest}" ]]; then
-  printf 'Digest:\n  %s\n' "${last_digest}"
-fi
+printf 'Published %s@%s\n' "$last_image" "$last_digest"

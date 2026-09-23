@@ -49,17 +49,17 @@ validation and the first verified off-site backup.
 
 ## Build Cache
 
-`scripts/k8s/build-local-image.sh` runs Kaniko in the cluster and enables a
-registry-backed cache:
+`scripts/k8s/build-local-image.sh` uses the managed Linux/amd64 rootless
+Docker daemon through the self-hosted runner. Its existing registry credentials
+and TLS trust are required; anonymous insecure Kaniko builds are retired.
+The persistent daemon reuses application dependency layers. Deliberate runtime
+rebuilds use `--pull --no-cache` so distribution security updates are refreshed.
+Every runtime base and application image is resolved to an immutable digest.
 
-```bash
-KANIKO_CACHE_REPO=10.152.183.28:5000/p2ppsr/papertrade-build-cache
-KANIKO_CACHE_TTL=720h
-```
-
-This keeps npm install layers and build layers close to the cluster. Rebuilds
-after TypeScript or CSS changes should reuse dependency layers instead of
-downloading packages again over Starlink.
+The production scanner receives a Docker archive of the pulled deployment digest.
+The runner and remote daemon have different filesystems, so the workflow uses
+`docker cp` instead of a workspace bind mount. No scanner Docker socket or registry
+credentials are exposed. Scan artifacts remain available on policy failure.
 
 ## Common Commands
 
