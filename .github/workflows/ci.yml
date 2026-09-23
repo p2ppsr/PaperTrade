@@ -19,7 +19,7 @@ jobs:
         env:
           CWI_NPM_TOKEN: ${{ secrets.CWI_NPM_TOKEN }}
       - run: python3 -m unittest discover -s scripts/k8s/tests -v
-      - run: bash -n scripts/k8s/deploy-local.sh
+      - run: bash -n scripts/k8s/deploy-local.sh scripts/k8s/build-local-image.sh scripts/k8s/scan-production-image.sh
       - run: npm audit --omit=dev --audit-level=high
       - run: npm run lint
       - run: npm run typecheck
