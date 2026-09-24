@@ -121,6 +121,7 @@ def endpoints(service, expected_pods=None, timeout=60):
 
 SMOKE = r"""
 const base=process.argv[1]||'http://127.0.0.1:8080';
+const peer=process.argv[2];
 async function get(path) { const r=await fetch(base+path,{signal:AbortSignal.timeout(10000)}); if(r.status!==200)throw Error(path+': '+r.status);return r; }
 const health=await (await get('/healthz')).json();if(!health.ok)throw Error('health not OK');
 await get('/'); const status=await (await get('/api/status')).json();if(status.status!=='success')throw Error('status not success');
@@ -132,15 +133,46 @@ if(view.status!=='success'||view.pageAccessMode!=='free'||!view.imageUrl?.starts
 const rendered=Buffer.from(await (await get(view.imageUrl)).arrayBuffer());if(rendered.subarray(0,8).toString('hex')!=='89504e470d0a1a0a')throw Error('rendered PNG failed');
 const paid=await fetch(base+`/api/publications/${id}/pages/2`,{signal:AbortSignal.timeout(10000)});
 if(paid.status!==401)throw Error('anonymous paid page did not reject');
-console.log(JSON.stringify({health:true,catalog:true,freePNG:true,freeJSON:true,renderedPNG:true,paidAccessDenied:true}));
+const {AuthFetch,PrivateKey,ProtoWallet}=await import('@bsv/sdk');
+const wallet=new ProtoWallet(PrivateKey.fromRandom());let challenge=false,spendBlocked=false;
+wallet.createAction=async args=>{
+  if(args.outputs?.length!==1||args.outputs[0].satoshis!==status.pricePerPageSats)throw Error('Unexpected payment amount');
+  spendBlocked=true;throw Error('TEST_PAYMENT_DISABLED');
+};
+let sequence=0;const destinations=new Set();
+const observe=async (url,init)=>{
+  const parsed=new URL(String(url));
+  const destination=peer&&sequence++%2===1?peer:base;
+  destinations.add(destination);
+  const response=await fetch(destination+parsed.pathname+parsed.search,{...init,signal:AbortSignal.timeout(10000)});
+  if(String(url).includes('/pages/2')){
+    if(response.status!==402||Number(response.headers.get('x-bsv-payment-satoshis-required'))!==status.pricePerPageSats||!response.headers.get('x-bsv-auth-signature'))throw Error('Authenticated payment challenge failed');
+    challenge=true;
+  }
+  return response;
+};
+const auth=new AuthFetch(wallet,undefined,undefined,undefined,{},observe);
+try{await auth.fetch(base+`/api/publications/${id}/pages/2?format=json`);throw Error('Expected blocked synthetic payment');}
+catch(error){if(error.message!=='TEST_PAYMENT_DISABLED')throw error;}
+if(!challenge||!spendBlocked)throw Error('Authenticated payment probe incomplete');
+if(peer&&destinations.size!==2)throw Error('Cross-replica authentication was not exercised');
+console.log(JSON.stringify({health:true,catalog:true,freePNG:true,freeJSON:true,renderedPNG:true,paidAccessDenied:true,authenticatedPaymentChallenge:true,spendingDisabled:true,crossReplica:destinations.size===2}));
 """
 
 
 def smoke(pods):
-    for pod in pods:
+    if len(pods) != 2:
+        raise RuntimeError('Smoke acceptance requires two replicas')
+    for index, pod in enumerate(pods):
         guard()
-        command('exec', pod['metadata']['name'], '--', 'node', '--input-type=module', '-e', SMOKE)
-        record('pod-smoke-passed', pod=pod['metadata']['name'])
+        peer = pods[1-index]
+        address = peer['status']['podIP']
+        if ':' in address:
+            address = '['+address+']'
+        command('exec', pod['metadata']['name'], '--', 'node', '--input-type=module', '-e', SMOKE,
+                'http://127.0.0.1:8080', 'http://'+address+':8080')
+        record('pod-smoke-passed', pod=pod['metadata']['name'],
+               peer=peer['metadata']['name'], crossReplica=True, spendingDisabled=True)
 
 
 def main(manifest, image):

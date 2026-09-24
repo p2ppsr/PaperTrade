@@ -143,13 +143,15 @@ The production deploy remains a separate, explicitly dispatched workflow.
 Production builds must pass the runtime policy on their exact immutable image
 digest. `deploy-local.sh` requires `IMAGE_TAG` and `IMAGE_DIGEST`; the deployment
 workflow supplies both from its build output and retains the scan and rollout
-evidence, including on failure. The SDK upgrade includes no database migration.
-Any future schema change needs compatibility review before using this procedure.
+evidence, including on failure. The shared protocol-state upgrade has the
+additive schema migration and compatibility requirements described below.
 
 `promote-guarded.py` creates two candidate replicas on distinct nodes behind a
 private Service, with a PDB and a copy of the existing production egress boundary.
 Both replicas must serve health, status, catalog and a real stored free-page PNG;
-an anonymous paid-page request must still be denied. The candidate's ten-second
+an anonymous paid-page request must still be denied, and a synthetic authenticated
+client must receive the configured signed 402 challenge with spending disabled.
+The candidate's ten-second
 preStop hook is exercised by withdrawing one candidate while another node serves
 100 consecutive requests. Two exact-image Ready replicas must return before
 promotion. Public root, health, catalog and stored-page probes run throughout.
@@ -169,3 +171,37 @@ delete that pool while the public Service selects it. A failure before cutover
 removes only the isolated candidate resources and preserves the old public pool.
 Network-ops fleet gates and independent public probes remain required around
 the workflow.
+
+## Shared authentication and payment state
+
+Migration `202609240001_shared_protocol_state.cjs` creates `auth_sessions`,
+`auth_message_nonces` and `payment_replays` before serving requests. Existing
+wallet, content, purchase and payout rows are unchanged. MySQL protocol tables
+use ASCII binary collation so distinct case-sensitive base64 nonces cannot
+collapse onto the same primary key. Every replica must use the same application
+database and server wallet identity. Session/nonce handling uses the published
+`KnexSessionManager`; initial-request claims are capped at 256 per identity.
+Expired sessions and orphaned nonces are pruned hourly with no overlapping prune
+in one process. Cleanup failure is logged without granting authentication.
+
+Both page and admin-funding payment middleware use the same atomic transaction-ID
+claim table. Claims have no expiration: pruning accepted transaction IDs could
+reopen replay of old payments. A duplicate returns false; database failures
+propagate so the middleware fails closed. Keep these rows through restarts,
+upgrades, restores and application rollback. The migration deliberately refuses
+`down`; rolling back code must not delete protocol state.
+
+Before promotion, take and verify an encrypted application-database backup.
+Rehearse the additive migration and check the MySQL table collations/primary keys.
+Old code ignores the extra tables, but old process-local sessions do not become
+shared: finish the guarded cutover before accepting replicated authentication.
+Do not remove the tables or roll back replay state while serving payments.
+
+Candidate acceptance must include a non-spending authenticated paid-page request
+that obtains a signed 402 challenge with the configured amount, with handshake
+and requests deliberately sent to different replicas. The synthetic client's
+`createAction` must throw before spending. Anonymous paid-page denial and free
+rendered routes remain required. A real bounded paid test is separate operator
+authorization and must verify the purchase ledger and entitlement, not merely an
+HTTP status. On any failure, preserve the evidence and halt the release wave;
+green free routes do not establish payment acceptance.
