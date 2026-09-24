@@ -19,6 +19,7 @@ import { STARTER_AUTHOR_NAME, STARTER_WORKS, starterCoverPath, starterWorkById, 
 import { appManifest, metaForPath, renderHtmlShell, robotsTxt, sitemapXml, walletManifest, type PublicPublicationMeta } from './web.js'
 import { paymentForPaidPagesOnly } from './paymentRouting.js'
 import { createProtocolState } from './protocolState.js'
+import { setPageResponseCachePolicy } from './pageResponseCache.js'
 import { deleteStoredDirectory, readStoredFile, storeBuffer, storedFileExists } from './objectStorage.js'
 
 const protocolState = createProtocolState(db)
@@ -618,7 +619,7 @@ async function sendPublicationPageImage (
   if (pageAccessMode != null) {
     res.setHeader('X-PaperTrade-Page-Access', pageAccessMode)
   }
-  res.setHeader('Cache-Control', 'private, max-age=60')
+  setPageResponseCachePolicy(res)
   if (req.query.format === 'json' && pageTokenSecret != null) {
     const extracted = await ensurePageText(
       publication.canonical_pdf_path,
