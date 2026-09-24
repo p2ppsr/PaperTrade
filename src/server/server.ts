@@ -18,7 +18,10 @@ import { ensurePageText, getPublicationDir, processPublicationFile } from './con
 import { STARTER_AUTHOR_NAME, STARTER_WORKS, starterCoverPath, starterWorkById, type StarterWork, writeStarterPdf } from './starterWorks.js'
 import { appManifest, metaForPath, renderHtmlShell, robotsTxt, sitemapXml, walletManifest, type PublicPublicationMeta } from './web.js'
 import { paymentForPaidPagesOnly } from './paymentRouting.js'
+import { createProtocolState } from './protocolState.js'
 import { deleteStoredDirectory, readStoredFile, storeBuffer, storedFileExists } from './objectStorage.js'
+
+const protocolState = createProtocolState(db)
 
 const serverDirname = path.dirname(fileURLToPath(import.meta.url))
 const HTTP_PORT = Number(process.env.HTTP_PORT ?? process.env.PORT ?? '3001')
@@ -1101,11 +1104,13 @@ async function createApp (): Promise<express.Express> {
 
   app.use(createAuthMiddleware({
     wallet: walletBootstrap.wallet,
-    allowUnauthenticated: true
+    allowUnauthenticated: true,
+    sessionManager: protocolState.sessionManager
   }))
 
   const pagePaymentMiddleware = createPaymentMiddleware({
     wallet: walletBootstrap.wallet,
+    replayStore: protocolState.replayStore,
     calculateRequestPrice: calculatePagePrice as any
   })
   const paidPagePaymentMiddleware = paymentForPaidPagesOnly(pagePaymentMiddleware)
@@ -1114,6 +1119,7 @@ async function createApp (): Promise<express.Express> {
 
   const adminFundingPaymentMiddleware = createPaymentMiddleware({
     wallet: walletBootstrap.wallet,
+    replayStore: protocolState.replayStore,
     calculateRequestPrice: calculateAdminFundingPrice as any
   })
 
@@ -2078,10 +2084,22 @@ createApp()
     const server = app.listen(HTTP_PORT, () => {
       console.log(`PaperTrade listening on ${HTTP_PORT}`)
     })
+    let pruning = false
+    const pruneSessions = (): void => {
+      if (pruning) return
+      pruning = true
+      void protocolState.sessionManager.pruneExpiredSessions()
+        .catch(() => { console.warn('Expired authentication session cleanup failed') })
+        .finally(() => { pruning = false })
+    }
+    const sessionCleanup = setInterval(pruneSessions, 60 * 60 * 1000)
+    sessionCleanup.unref()
+    pruneSessions()
     let stopping = false
     const stop = (): void => {
       if (stopping) return
       stopping = true
+      clearInterval(sessionCleanup)
       void closeHttpServer(server)
         .then(async () => { await db.destroy() })
         .then(() => { process.exit(0) })

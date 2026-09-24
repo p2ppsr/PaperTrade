@@ -97,6 +97,12 @@ as local scratch space. Each processed publication version is written to a new
 object prefix before its database rows are updated, so a failed replacement
 cannot overwrite the previously published files.
 
+Replicas also share protocol state in the application database: authentication
+sessions and one-time nonces use the published toolbox `KnexSessionManager`,
+and both page purchases and admin funding share durable payment transaction
+claims. Startup migrations create the additive tables before requests are served.
+See [the protocol-state rollout requirements](docs/devops.md#shared-authentication-and-payment-state).
+
 ## Project Layout
 
 ```text
