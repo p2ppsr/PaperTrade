@@ -1,0 +1,14 @@
+apiVersion: proofrun.dev/v1
+kind: DeviceProfile
+metadata:
+  id: device.webkit-desktop
+  version: 1.0.0
+  name: WebKit desktop 1440x900
+  description: Portable desktop WebKit coverage without a product-specific browser image.
+platform: web
+driver: playwright
+screen: {width: 1440, height: 900, scale: 1, orientation: landscape, colorScheme: light}
+browser: {engine: webkit}
+accessibility: [keyboard, axe, zoom]
+capabilities: [browser.screenshot, browser.dom, browser.trace]
+isolation: {ephemeral: true, networkPolicy: allowlisted, trustedRefsOnly: false}
