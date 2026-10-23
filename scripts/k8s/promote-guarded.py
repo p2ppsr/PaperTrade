@@ -175,6 +175,35 @@ def smoke(pods):
                peer=peer['metadata']['name'], crossReplica=True, spendingDisabled=True)
 
 
+
+def drain_withdrawn_pool(pods, timeout=300):
+    """Require ten continuous seconds without active HTTP sockets before replacement."""
+    socket_script = r"""const fs=require('node:fs');let n=0;for(const f of ['/proc/net/tcp','/proc/net/tcp6'])for(const l of fs.readFileSync(f,'utf8').trim().split('\n').slice(1)){const p=l.trim().split(/\s+/);if(p[1].endsWith(':1F90')&&!['06','07','0A'].includes(p[3]))n++;}console.log(n)"""
+    deadline = time.monotonic() + timeout
+    quiet_since = None
+    while time.monotonic() < deadline:
+        guard()
+        counts = []
+        for pod in pods:
+            current = read('pod', pod['metadata']['name'])
+            if current['metadata']['uid'] != pod['metadata']['uid']:
+                raise RuntimeError('Withdrawn Pod identity changed before drain')
+            count = int(command('exec', pod['metadata']['name'], '--', 'node', '-e', socket_script).strip())
+            if count < 0:
+                raise RuntimeError('Invalid HTTP socket count')
+            counts.append(count)
+        now = time.monotonic()
+        if any(counts):
+            quiet_since = None
+        elif quiet_since is None:
+            quiet_since = now
+        elif now - quiet_since >= 10:
+            record('withdrawn-pool-drained', pods=[p['metadata']['name'] for p in pods], quiet_seconds=10)
+            return
+        pause(1)
+    raise RuntimeError('Withdrawn pool still has active HTTP sockets; preserve serving candidate')
+
+
 def main(manifest, image):
     if '@sha256:' not in image or len(image.rsplit('@sha256:', 1)[1]) != 64:
         raise ValueError('An immutable candidate digest is required')
@@ -195,6 +224,9 @@ def main(manifest, image):
     if any(d['metadata']['name'] == CANDIDATE for d in read('deployments')['items']):
         raise RuntimeError('A prior candidate still exists; preserve and reconcile it before a new promotion')
     endpoints('papertrade')
+    old_pods = [p for p in read('pods', selector='app.kubernetes.io/name=papertrade,app.kubernetes.io/component=api')['items'] if not p['metadata'].get('deletionTimestamp')]
+    if len(old_pods) != 2:
+        raise RuntimeError('Expected two canonical Pods before creating candidate')
     # The shadow pool is never selected by the public Service until both Pods pass.
     candidate = copy.deepcopy(desired)
     candidate['metadata']['name'] = CANDIDATE
@@ -252,8 +284,9 @@ def main(manifest, image):
         command('patch', 'service', 'papertrade', '--type=merge', '-p', json.dumps({'spec': {'selector': selector}}))
         endpoints('papertrade', {p['metadata']['name'] for p in pods})
         record('public-cutover-to-candidate')
-        # Old Pods have no hook: withdraw them and wait before touching their Deployment.
+        # Withdraw before replacement, and prove that existing HTTP work is finished.
         pause(10)
+        drain_withdrawn_pool(old_pods)
         for resource in resources:
             if resource['kind'] != 'Service':
                 apply(resource)

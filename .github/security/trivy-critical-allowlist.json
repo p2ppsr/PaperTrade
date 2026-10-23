@@ -3,24 +3,72 @@
     "vulnerability": "CVE-2026-6653",
     "package": "libxml2",
     "installed_version": "2.12.7+dfsg+really2.9.14-2.1+deb13u3",
-    "reviewed_on": "2026-09-23",
-    "expires": "2026-09-30",
-    "rationale": "Re-reviewed against the current Debian tracker and exact fresh image: Trixie still has no fixed package and classifies this crafted-XML denial of service as minor/no-DSA. Authenticated document conversion may reach it; process timeouts and non-root resource-limited containers limit impact but are not a fix. A seven-day continuation preserves the existing bounded exception while a compatible vendor fix is unavailable; the upstream entity-parser rework is not a small ABI-neutral backport.",
+    "reviewed_on": "2026-10-23",
+    "expires": "2026-10-23",
+    "rationale": "The operator explicitly approved this exact CVE/package/version through the end of 2026-10-23 UTC to deploy the Node.js security patch. Both currently serving Pods contain this same package version; Debian Trixie has no compatible published fix. Untrusted documents can reach native XML/image processing, so memory corruption, code execution or denial-of-service risk remains. Existing container limits are not a fix. This exception does not authorize any additional finding or suppress fixable critical/high findings.",
     "source": "https://security-tracker.debian.org/tracker/CVE-2026-6653",
     "owner": "ty-everett",
-    "review_evidence": "docs/runtime-security-review-2026-09-23.md",
-    "removal_condition": "Remove when a compatible Debian Trixie fix is available and the rebuilt image no longer reports this exact finding; otherwise re-assess before expiry."
+    "review_evidence": "docs/runtime-security-review-2026-10-23.md",
+    "removal_condition": "Remove when a compatible fix is available and the rebuilt image no longer reports this exact finding. Expires at end of 2026-10-23 UTC; no automatic renewal."
   },
   {
     "vulnerability": "CVE-2026-54058",
     "package": "python3-pil",
     "installed_version": "11.1.0-5+deb13u4",
-    "reviewed_on": "2026-09-23",
-    "expires": "2026-09-30",
-    "rationale": "Re-reviewed against the current Debian tracker and exact fresh image: Trixie still has no fixed Pillow package and classifies the McIdas AREA mmap memory disclosure/denial of service as minor/no-DSA. Authenticated conversion handles untrusted EPUB/docx content, so embedded-image exposure is not excluded. Continue this existing exact-version exception for seven days only; current container and conversion limits do not establish that malformed images are safe.",
+    "reviewed_on": "2026-10-23",
+    "expires": "2026-10-23",
+    "rationale": "The operator explicitly approved this exact CVE/package/version through the end of 2026-10-23 UTC to deploy the Node.js security patch. Both currently serving Pods contain this same package version; Debian Trixie has no compatible published fix. Untrusted documents can reach native XML/image processing, so memory corruption, code execution or denial-of-service risk remains. Existing container limits are not a fix. This exception does not authorize any additional finding or suppress fixable critical/high findings.",
     "source": "https://security-tracker.debian.org/tracker/CVE-2026-54058",
     "owner": "ty-everett",
-    "review_evidence": "docs/runtime-security-review-2026-09-23.md",
-    "removal_condition": "Remove when a compatible Debian Trixie fix is available and the rebuilt image no longer reports this exact finding; otherwise re-assess before expiry."
+    "review_evidence": "docs/runtime-security-review-2026-10-23.md",
+    "removal_condition": "Remove when a compatible fix is available and the rebuilt image no longer reports this exact finding. Expires at end of 2026-10-23 UTC; no automatic renewal."
+  },
+  {
+    "vulnerability": "CVE-2026-112393",
+    "package": "python3-pil",
+    "installed_version": "11.1.0-5+deb13u4",
+    "reviewed_on": "2026-10-23",
+    "expires": "2026-10-23",
+    "rationale": "The operator explicitly approved this exact CVE/package/version through the end of 2026-10-23 UTC to deploy the Node.js security patch. Both currently serving Pods contain this same package version; Debian Trixie has no compatible published fix. Untrusted documents can reach native XML/image processing, so memory corruption, code execution or denial-of-service risk remains. Existing container limits are not a fix. This exception does not authorize any additional finding or suppress fixable critical/high findings.",
+    "source": "https://security-tracker.debian.org/tracker/CVE-2026-112393",
+    "owner": "ty-everett",
+    "review_evidence": "docs/runtime-security-review-2026-10-23.md",
+    "removal_condition": "Remove when a compatible fix is available and the rebuilt image no longer reports this exact finding. Expires at end of 2026-10-23 UTC; no automatic renewal."
+  },
+  {
+    "vulnerability": "CVE-2026-112403",
+    "package": "python3-pil",
+    "installed_version": "11.1.0-5+deb13u4",
+    "reviewed_on": "2026-10-23",
+    "expires": "2026-10-23",
+    "rationale": "The operator explicitly approved this exact CVE/package/version through the end of 2026-10-23 UTC to deploy the Node.js security patch. Both currently serving Pods contain this same package version; Debian Trixie has no compatible published fix. Untrusted documents can reach native XML/image processing, so memory corruption, code execution or denial-of-service risk remains. Existing container limits are not a fix. This exception does not authorize any additional finding or suppress fixable critical/high findings.",
+    "source": "https://security-tracker.debian.org/tracker/CVE-2026-112403",
+    "owner": "ty-everett",
+    "review_evidence": "docs/runtime-security-review-2026-10-23.md",
+    "removal_condition": "Remove when a compatible fix is available and the rebuilt image no longer reports this exact finding. Expires at end of 2026-10-23 UTC; no automatic renewal."
+  },
+  {
+    "vulnerability": "CVE-2026-112900",
+    "package": "python3-pil",
+    "installed_version": "11.1.0-5+deb13u4",
+    "reviewed_on": "2026-10-23",
+    "expires": "2026-10-23",
+    "rationale": "The operator explicitly approved this exact CVE/package/version through the end of 2026-10-23 UTC to deploy the Node.js security patch. Both currently serving Pods contain this same package version; Debian Trixie has no compatible published fix. Untrusted documents can reach native XML/image processing, so memory corruption, code execution or denial-of-service risk remains. Existing container limits are not a fix. This exception does not authorize any additional finding or suppress fixable critical/high findings.",
+    "source": "https://security-tracker.debian.org/tracker/CVE-2026-112900",
+    "owner": "ty-everett",
+    "review_evidence": "docs/runtime-security-review-2026-10-23.md",
+    "removal_condition": "Remove when a compatible fix is available and the rebuilt image no longer reports this exact finding. Expires at end of 2026-10-23 UTC; no automatic renewal."
+  },
+  {
+    "vulnerability": "CVE-2026-96639",
+    "package": "python3-pil",
+    "installed_version": "11.1.0-5+deb13u4",
+    "reviewed_on": "2026-10-23",
+    "expires": "2026-10-23",
+    "rationale": "The operator explicitly approved this exact CVE/package/version through the end of 2026-10-23 UTC to deploy the Node.js security patch. Both currently serving Pods contain this same package version; Debian Trixie has no compatible published fix. Untrusted documents can reach native XML/image processing, so memory corruption, code execution or denial-of-service risk remains. Existing container limits are not a fix. This exception does not authorize any additional finding or suppress fixable critical/high findings.",
+    "source": "https://security-tracker.debian.org/tracker/CVE-2026-96639",
+    "owner": "ty-everett",
+    "review_evidence": "docs/runtime-security-review-2026-10-23.md",
+    "removal_condition": "Remove when a compatible fix is available and the rebuilt image no longer reports this exact finding. Expires at end of 2026-10-23 UTC; no automatic renewal."
   }
 ]

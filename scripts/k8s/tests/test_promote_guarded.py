@@ -43,6 +43,7 @@ class PromotionSafety(unittest.TestCase):
         def read(kind, name=None, selector=None):
             if kind == 'service': return SERVICE
             if kind == 'deployments': return {'items': []}
+            if kind == 'pods': return {'items': [{'metadata': {'name': 'old-a', 'uid': 'a'}}, {'metadata': {'name': 'old-b', 'uid': 'b'}}]}
             if kind == 'networkpolicies': return {'items': [POLICY]}
             if kind == 'pdb': return {'status': {'disruptionsAllowed': 1}}
             raise AssertionError(kind)
@@ -60,6 +61,7 @@ class PromotionSafety(unittest.TestCase):
         with patch.object(m, 'command', command), patch.object(m, 'read', read), \
              patch.object(m, 'ready_pool', pool), patch.object(m, 'endpoints'), \
              patch.object(m, 'smoke', smoke), patch.object(m, 'record', record), \
+             patch.object(m, 'drain_withdrawn_pool', side_effect=lambda pods: self.trace.append(('drain', [p['metadata']['name'] for p in pods]))), \
              patch.object(m, 'pause', lambda seconds: self.trace.append(('wait', seconds))), \
              patch.object(m.threading, 'Thread'), patch.object(m.subprocess, 'Popen', return_value=probe):
             m.main('manifest.yaml', IMAGE)
@@ -71,8 +73,30 @@ class PromotionSafety(unittest.TestCase):
                                and json.loads(t[2]).get('kind') == 'Deployment'
                                and json.loads(t[2])['metadata']['name'] == 'papertrade')
         self.assertIn(('wait', 10), self.trace[cutover:canonical_apply])
+        self.assertIn(('drain', ['old-a', 'old-b']), self.trace[cutover:canonical_apply])
         self.assertTrue(any(t[:2] == ('event', 'promotion-accepted') for t in self.trace))
         self.assertTrue(any(t[0] == 'command' and t[1][:2] == ('delete', 'deployment') for t in self.trace))
+
+
+    def test_drain_waits_for_continuous_quiet_after_active_work(self):
+        pod = {'metadata': {'name': 'old-a', 'uid': 'a'}}
+        clock = iter([0, 1, 2, 3, 4, 5, 6, 16, 17])
+        with patch.object(m.time, 'monotonic', side_effect=lambda: next(clock)), \
+             patch.object(m, 'read', return_value=pod), \
+             patch.object(m, 'command', side_effect=['0', '1', '0', '0']), \
+             patch.object(m, 'pause'), patch.object(m, 'record') as record:
+            m.drain_withdrawn_pool([pod])
+        record.assert_called_once_with('withdrawn-pool-drained', pods=['old-a'], quiet_seconds=10)
+
+    def test_drain_timeout_never_accepts_active_socket(self):
+        pod = {'metadata': {'name': 'old-a', 'uid': 'a'}}
+        with patch.object(m.time, 'monotonic', side_effect=[0, 1, 2, 301]), \
+             patch.object(m, 'read', return_value=pod), \
+             patch.object(m, 'command', return_value='1'), \
+             patch.object(m, 'pause'), patch.object(m, 'record') as record:
+            with self.assertRaisesRegex(RuntimeError, 'still has active HTTP'):
+                m.drain_withdrawn_pool([pod])
+        record.assert_not_called()
 
     def test_shadow_service_does_not_inherit_live_allocated_address(self):
         self.exercise()
