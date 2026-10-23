@@ -51,8 +51,16 @@ runtime_base_digest="$(docker image inspect "$runtime_ref" --format '{{json .Rep
 runtime_base_image="${registry_pull}/p2ppsr/papertrade-runtime-base@${runtime_base_digest}"
 # Pull via the exact name used in FROM so Docker validates that registry path too.
 docker pull "$runtime_base_image"
-docker run --rm --network none --read-only --entrypoint node "$runtime_base_image" \
-  -e "if(process.versions.node!=='24.22.1')process.exit(1)"
+# Execute the exact base with the same rootless build executor used below.
+# Standalone docker run requires a user.slice delegation unavailable on this
+# managed daemon. This uncached, network-isolated check still executes Node;
+# neither an image label nor cached build output can satisfy it.
+docker build --platform linux/amd64 --no-cache --network=none \
+  --build-arg "RUNTIME_BASE_IMAGE=$runtime_base_image" - <<'DOCKERFILE'
+ARG RUNTIME_BASE_IMAGE=scratch
+FROM ${RUNTIME_BASE_IMAGE}
+RUN node -e "require('node:assert/strict').equal(process.versions.node,'24.22.1')"
+DOCKERFILE
 last_image="$runtime_base_image"
 last_digest="$runtime_base_digest"
 last_tag="$runtime_base_tag"
