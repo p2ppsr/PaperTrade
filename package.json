@@ -79,7 +79,8 @@
     "node": ">=22.0.0"
   },
   "overrides": {
-    "qs": "6.16.0"
+    "qs": "6.16.0",
+    "@types/jest": "30.0.0"
   },
   "ts-standard": {
     "ignore": [
