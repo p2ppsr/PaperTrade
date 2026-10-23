@@ -15,6 +15,10 @@ on:
         options:
           - "false"
           - "true"
+      runtime_base_image:
+        description: Optional immutable Evans PaperTrade runtime base from a previous verified build.
+        required: false
+        type: string
 
 permissions:
   contents: read
@@ -33,6 +37,7 @@ jobs:
       - local-registry
     environment: production
     env:
+      RUNTIME_BASE_IMAGE: ${{ github.event.inputs.runtime_base_image }}
       REGISTRY_PUSH: ${{ vars.LOCAL_REGISTRY_PUSH || 'registry.cars-operator-system.svc.cluster.local:5000' }}
       REGISTRY_PULL: ${{ vars.LOCAL_REGISTRY_PULL || 'registry.cars-operator-system.svc.cluster.local:5000' }}
       KUBECTL: ${{ vars.LOCAL_KUBECTL || 'kubectl' }}
