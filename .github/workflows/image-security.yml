@@ -10,6 +10,8 @@ on:
       - Dockerfile.runtime-base
       - package.json
       - package-lock.json
+      - scripts/k8s/**
+      - .github/workflows/deploy-production-local.yml
   push:
     branches:
       - master
@@ -21,6 +23,8 @@ on:
       - Dockerfile.runtime-base
       - package.json
       - package-lock.json
+      - scripts/k8s/**
+      - .github/workflows/deploy-production-local.yml
   schedule:
     - cron: "41 11 * * 2"
   workflow_dispatch:
