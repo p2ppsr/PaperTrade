@@ -60,6 +60,12 @@ def pause(seconds):
         guard()
 
 
+def live_pods(pods):
+    """Terminal retained Pods are history, not members of the serving pool."""
+    return [pod for pod in pods if not pod['metadata'].get('deletionTimestamp')
+            and pod.get('status', {}).get('phase') not in {'Succeeded', 'Failed'}]
+
+
 def public_watch():
     while not STOP.is_set():
         for route in ['/', '/healthz', '/api/publications', f'/api/publications/{BOOK}/pages/1']:
@@ -86,7 +92,7 @@ def ready_pool(name, component, image, timeout=900):
         guard()
         deployment = read('deployment', name)
         status = deployment.get('status', {})
-        pods = [p for p in read('pods', selector=selector)['items'] if not p['metadata'].get('deletionTimestamp')]
+        pods = live_pods(read('pods', selector=selector)['items'])
         nodes = {p['spec'].get('nodeName') for p in pods}
         good = (status.get('observedGeneration') == deployment['metadata']['generation']
                 and all(status.get(key) == 2 for key in ['updatedReplicas', 'readyReplicas', 'availableReplicas'])
@@ -224,9 +230,10 @@ def main(manifest, image):
     if any(d['metadata']['name'] == CANDIDATE for d in read('deployments')['items']):
         raise RuntimeError('A prior candidate still exists; preserve and reconcile it before a new promotion')
     endpoints('papertrade')
-    old_pods = [p for p in read('pods', selector='app.kubernetes.io/name=papertrade,app.kubernetes.io/component=api')['items'] if not p['metadata'].get('deletionTimestamp')]
+    old_pods = live_pods(read('pods', selector='app.kubernetes.io/name=papertrade,app.kubernetes.io/component=api')['items'])
     if len(old_pods) != 2:
         raise RuntimeError('Expected two canonical Pods before creating candidate')
+    endpoints('papertrade', expected_pods={pod['metadata']['name'] for pod in old_pods})
     # The shadow pool is never selected by the public Service until both Pods pass.
     candidate = copy.deepcopy(desired)
     candidate['metadata']['name'] = CANDIDATE

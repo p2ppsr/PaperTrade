@@ -29,6 +29,10 @@ build_target="${BUILD_TARGET:-app}"
 runtime_repo="${registry_push}/p2ppsr/papertrade-runtime-base"
 app_repo="${registry_push}/p2ppsr/papertrade"
 runtime_ref="${RUNTIME_BASE_IMAGE:-${runtime_repo}:${runtime_base_tag}}"
+if [[ -n "${RUNTIME_BASE_IMAGE:-}" && ! "${RUNTIME_BASE_IMAGE}" =~ ^registry\.cars-operator-system\.svc\.cluster\.local:5000/p2ppsr/papertrade-runtime-base@sha256:[a-f0-9]{64}$ ]]; then
+  echo 'A reused runtime base must be an immutable PaperTrade base in the Evans registry' >&2
+  exit 2
+fi
 
 # Docker uses the runner's existing registry credentials and verified TLS.
 # Resolve every base and published image to a registry-verified immutable digest.
@@ -47,6 +51,8 @@ runtime_base_digest="$(docker image inspect "$runtime_ref" --format '{{json .Rep
 runtime_base_image="${registry_pull}/p2ppsr/papertrade-runtime-base@${runtime_base_digest}"
 # Pull via the exact name used in FROM so Docker validates that registry path too.
 docker pull "$runtime_base_image"
+docker run --rm --network none --read-only --entrypoint node "$runtime_base_image" \
+  -e "if(process.versions.node!=='24.22.1')process.exit(1)"
 last_image="$runtime_base_image"
 last_digest="$runtime_base_digest"
 last_tag="$runtime_base_tag"

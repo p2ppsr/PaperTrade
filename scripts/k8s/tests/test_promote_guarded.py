@@ -20,6 +20,16 @@ POLICY = {'apiVersion': 'networking.k8s.io/v1', 'kind': 'NetworkPolicy', 'metada
 
 
 class PromotionSafety(unittest.TestCase):
+    def test_terminal_pods_are_history_but_an_extra_active_pod_is_retained(self):
+        def pod(name, phase, deleting=False):
+            return {'metadata': {'name': name, **({'deletionTimestamp': 'now'} if deleting else {})},
+                    'status': {'phase': phase}}
+        first, second = pod('first', 'Running'), pod('second', 'Running')
+        pending = pod('third', 'Pending')
+        rows = [first, pod('completed', 'Succeeded'), second, pod('failed', 'Failed'),
+                pod('deleting', 'Running', True), pending]
+        self.assertEqual(m.live_pods(rows), [first, second, pending])
+
     def setUp(self):
         m.FAILURE.clear()
         m.STOP.clear()
